@@ -5,10 +5,11 @@ import (
 	"net/http"
 )
 
-func routes() http.Handler {
+func routes(accounts accountLookup) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", handleRoot)
 	mux.HandleFunc("GET /healthz", handleHealth)
+	mux.HandleFunc("GET /{identifier}", handleAccount(accounts))
 	return mux
 }
 

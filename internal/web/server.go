@@ -8,13 +8,15 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/bluesky-social/account-info/internal/profile"
 )
 
 // Serve starts the HTTP server and blocks until it stops or ctx is canceled.
 func Serve(ctx context.Context, address string) error {
 	server := &http.Server{
 		Addr:              address,
-		Handler:           routes(),
+		Handler:           routes(profile.NewDefaultService()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,

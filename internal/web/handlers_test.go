@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,8 @@ import (
 
 func TestBasicRoutes(t *testing.T) {
 	t.Parallel()
+
+	accounts := &fakeAccountLookup{}
 
 	tests := []struct {
 		name string
@@ -24,14 +27,15 @@ func TestBasicRoutes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			request := httptest.NewRequest(
+			request := httptest.NewRequestWithContext(
+				context.Background(),
 				http.MethodGet,
 				test.path,
 				http.NoBody,
 			)
 			response := httptest.NewRecorder()
 
-			routes().ServeHTTP(response, request)
+			routes(accounts).ServeHTTP(response, request)
 
 			require.Equal(t, http.StatusOK, response.Code)
 			require.Equal(t, test.body, response.Body.String())
