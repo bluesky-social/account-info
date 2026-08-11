@@ -119,6 +119,25 @@ func TestServiceLookupAllSkipsMissingRecords(t *testing.T) {
 	require.Equal(t, "app.example.profile", account.Profiles[0].Collection)
 }
 
+func TestNewServiceDeduplicatesSources(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(
+		&fakeResolver{},
+		&fakeReader{},
+		"app.example.profile",
+		Source{Collection: "app.example.profile", RecordKey: "self"},
+		Source{Collection: "app.example.profile", RecordKey: "self"},
+		Source{Collection: "org.example.profile", RecordKey: "self"},
+	)
+
+	require.Equal(
+		t,
+		[]string{"app.example.profile", "org.example.profile"},
+		service.Collections(),
+	)
+}
+
 func TestBlueskyProfileSummary(t *testing.T) {
 	t.Parallel()
 

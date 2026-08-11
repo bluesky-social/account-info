@@ -14,6 +14,7 @@ import (
 	"github.com/jcalabro/atmos/api/comatproto"
 	"github.com/jcalabro/atmos/identity"
 	"github.com/jcalabro/atmos/xrpc"
+	"github.com/jcalabro/gt"
 )
 
 const profileRecordKey = "self"
@@ -28,7 +29,7 @@ func (r *atprotoResolver) Resolve(
 ) (Identity, error) {
 	identifier, err := atmos.ParseATIdentifier(raw)
 	if err != nil {
-		return Identity{}, fmt.Errorf("parse identifier: %w", err)
+		return Identity{}, fmt.Errorf("%w: %w", ErrInvalidIdentifier, err)
 	}
 
 	resolved, err := r.directory.Lookup(ctx, identifier.Normalize())
@@ -50,14 +51,22 @@ func (r *atprotoResolver) Resolve(
 	return result, nil
 }
 
-type atprotoRecordReader struct{}
+type atprotoRecordReader struct {
+	httpClient *http.Client
+}
 
-func (*atprotoRecordReader) Get(
+func (r *atprotoRecordReader) Get(
 	ctx context.Context,
 	account Identity,
 	source Source,
 ) (Record, error) {
-	client := &xrpc.Client{Host: account.PDS}
+	if err := validatePDSURL(account.PDS); err != nil {
+		return Record{}, fmt.Errorf("%w: %w", ErrNoPDS, err)
+	}
+	client := &xrpc.Client{
+		Host:       account.PDS,
+		HTTPClient: gt.Some(r.httpClient),
+	}
 	output, err := comatproto.RepoGetRecord(
 		ctx,
 		client,
@@ -67,10 +76,12 @@ func (*atprotoRecordReader) Get(
 		source.RecordKey,
 	)
 	if err != nil {
+		// Only the protocol-defined RecordNotFound error means the record
+		// is absent. A bare 404 (missing XRPC route, misconfigured proxy,
+		// wrong endpoint) must propagate rather than read as "no profile".
 		var xrpcErr *xrpc.Error
 		if errors.As(err, &xrpcErr) &&
-			(xrpcErr.Name == comatproto.ErrRepoGetRecord_RecordNotFound ||
-				xrpcErr.StatusCode == http.StatusNotFound) {
+			xrpcErr.Name == comatproto.ErrRepoGetRecord_RecordNotFound {
 			return Record{}, ErrRecordNotFound
 		}
 		return Record{}, err
@@ -121,7 +132,21 @@ func extractBlueskyProfile(
 	return summary, nil
 }
 
-func blobURL(pds string, did string, cid string) (string, error) {
+// validatePDSURL rejects PDS endpoints that are not plain https origins.
+// The IP-level SSRF guard lives in the dial hook (httpclient.go); this
+// catches malformed schemes before a request is even attempted.
+func validatePDSURL(pds string) error {
+	parsed, err := url.Parse(pds)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("PDS endpoint must be an https origin: %q", pds)
+	}
+	return nil
+}
+
+func blobURL(pds, did, cid string) (string, error) {
 	base, err := url.Parse(pds)
 	if err != nil {
 		return "", err
@@ -143,14 +168,20 @@ func blobURL(pds string, did string, cid string) (string, error) {
 
 // NewDefaultService uses Bluesky profiles as the temporary authority policy.
 func NewDefaultService() *Service {
+	// One public-only client is shared by identity resolution and record
+	// reads: every outbound host (PLC directory aside, handle domains, DID
+	// service endpoints, PDS hosts) is account-controlled input.
+	httpClient := newPublicOnlyHTTPClient()
 	resolver := &atprotoResolver{
 		directory: &identity.Directory{
-			Resolver: &identity.DefaultResolver{},
+			Resolver: &identity.DefaultResolver{
+				HTTPClient: gt.Some(httpClient),
+			},
 		},
 	}
 	return NewService(
 		resolver,
-		&atprotoRecordReader{},
+		&atprotoRecordReader{httpClient: httpClient},
 		bsky.NSIDActorProfile,
 		Source{
 			Collection: bsky.NSIDActorProfile,

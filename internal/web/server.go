@@ -41,7 +41,12 @@ func Serve(ctx context.Context, address string) error {
 
 		slog.Info("shutting down HTTP server")
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shut down: %w", err)
+			// Shutdown returns on context expiry without closing active
+			// connections; force-close so Serve never leaks handlers.
+			return errors.Join(
+				fmt.Errorf("shut down: %w", err),
+				server.Close(),
+			)
 		}
 
 		return nil

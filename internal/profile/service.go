@@ -10,6 +10,8 @@ import (
 )
 
 var (
+	// ErrInvalidIdentifier indicates a malformed account identifier.
+	ErrInvalidIdentifier = errors.New("invalid identifier")
 	// ErrIdentityNotFound indicates that an AT Protocol identity was not found.
 	ErrIdentityNotFound = errors.New("identity not found")
 	// ErrNoPDS indicates that an identity does not declare a PDS.
@@ -93,8 +95,10 @@ func NewService(
 		order:         make([]string, 0, len(sources)),
 	}
 	for _, source := range sources {
+		if _, exists := service.sources[source.Collection]; !exists {
+			service.order = append(service.order, source.Collection)
+		}
 		service.sources[source.Collection] = source
-		service.order = append(service.order, source.Collection)
 	}
 	return service
 }

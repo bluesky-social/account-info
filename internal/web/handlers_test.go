@@ -47,3 +47,19 @@ func TestBasicRoutes(t *testing.T) {
 		})
 	}
 }
+
+func TestUnmatchedPathReturnsNotFound(t *testing.T) {
+	t.Parallel()
+
+	request := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"/unknown/nested/path",
+		http.NoBody,
+	)
+	response := httptest.NewRecorder()
+
+	routes(&fakeAccountLookup{}).ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusNotFound, response.Code)
+}

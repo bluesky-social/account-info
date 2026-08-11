@@ -10,6 +10,7 @@ linters:
     - durationcheck
     - errorlint
     - fatcontext
+    - gocritic
     - misspell
     - musttag
     - nakedret

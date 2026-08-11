@@ -8,9 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/bluesky-social/account-info/internal/profile"
 )
+
+// lookupTimeout bounds one account lookup end to end. It must stay below
+// the server's WriteTimeout so the handler can still write an error response.
+const lookupTimeout = 25 * time.Second
 
 type accountLookup interface {
 	Collections() []string
@@ -31,9 +36,15 @@ func handleAccount(accounts accountLookup) http.HandlerFunc {
 			return
 		}
 
+		// Bound the whole lookup (identity resolution + record fetches,
+		// including the XRPC client's internal retries) below the server's
+		// 30s WriteTimeout so a slow PDS can't stack retries past it.
+		ctx, cancel := context.WithTimeout(request.Context(), lookupTimeout)
+		defer cancel()
+
 		collections := request.URL.Query()["collection"]
 		account, err := accounts.Lookup(
-			request.Context(),
+			ctx,
 			request.PathValue("identifier"),
 			collections,
 		)
@@ -102,6 +113,14 @@ func writeLookupError(
 	collections []string,
 ) {
 	switch {
+	case errors.Is(err, profile.ErrInvalidIdentifier):
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"invalid_identifier",
+			err.Error(),
+			nil,
+		)
 	case errors.Is(err, profile.ErrIdentityNotFound):
 		writeError(w, http.StatusNotFound, "account_not_found", err.Error(), nil)
 	case errors.Is(err, profile.ErrNoPDS):
@@ -113,6 +132,15 @@ func writeLookupError(
 			"unsupported_collection",
 			err.Error(),
 			collections,
+		)
+	case errors.Is(err, context.DeadlineExceeded):
+		slog.Warn("profile lookup timed out", "error", err)
+		writeError(
+			w,
+			http.StatusGatewayTimeout,
+			"upstream_timeout",
+			"profile lookup timed out",
+			nil,
 		)
 	default:
 		slog.Error("profile lookup failed", "error", err)
@@ -141,9 +169,22 @@ func writeError(
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
+	// Marshal before committing the status so an encode failure (e.g.
+	// invalid upstream json.RawMessage in a Record) yields a 500 instead
+	// of the requested status with a truncated body.
+	payload, err := json.Marshal(value)
+	if err != nil {
+		slog.Error("encode JSON response", "error", err)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(
+			[]byte(`{"error":"internal_error","message":"failed to encode response"}` + "\n"),
+		)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
+	if _, err := w.Write(append(payload, '\n')); err != nil {
 		slog.Error("write JSON response", "error", err)
 	}
 }

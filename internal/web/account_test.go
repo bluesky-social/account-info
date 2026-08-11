@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -128,6 +129,13 @@ func TestAccountHandlerErrors(t *testing.T) {
 			code:   "multiple_profiles",
 		},
 		{
+			name:   "invalid identifier",
+			target: "/not-a-valid-identifier",
+			lookup: &fakeAccountLookup{err: profile.ErrInvalidIdentifier},
+			status: http.StatusBadRequest,
+			code:   "invalid_identifier",
+		},
+		{
 			name:   "identity not found",
 			target: "/alice.example",
 			lookup: &fakeAccountLookup{err: profile.ErrIdentityNotFound},
@@ -143,6 +151,15 @@ func TestAccountHandlerErrors(t *testing.T) {
 			},
 			status: http.StatusBadRequest,
 			code:   "unsupported_collection",
+		},
+		{
+			name:   "lookup timeout",
+			target: "/alice.example",
+			lookup: &fakeAccountLookup{
+				err: fmt.Errorf("get profile: %w", context.DeadlineExceeded),
+			},
+			status: http.StatusGatewayTimeout,
+			code:   "upstream_timeout",
 		},
 		{
 			name:   "upstream error",
@@ -164,6 +181,20 @@ func TestAccountHandlerErrors(t *testing.T) {
 			require.Equal(t, test.code, body.Error)
 		})
 	}
+}
+
+func TestWriteJSONEncodeFailureReturnsInternalError(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(1)}
+	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Profiles[0].Value = json.RawMessage(`{invalid`)
+	response := requestAccount(t, lookup, "/alice.example")
+
+	require.Equal(t, http.StatusInternalServerError, response.Code)
+	var body errorResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Equal(t, "internal_error", body.Error)
 }
 
 func requestAccount(
