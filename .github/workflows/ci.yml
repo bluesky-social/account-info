@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-lint-test:
+    name: Build, lint, and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash --noprofile --norc -euo pipefail {0}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          enable_kvm: false
+          set_as_trusted_user: false
+
+      - name: Remove GitHub token from Nix configuration
+        run: |
+          sudo sed --in-place '/^access-tokens = github.com=/d' /etc/nix/nix.conf
+          if sudo grep --quiet '^access-tokens = github.com=' /etc/nix/nix.conf; then
+            echo "GitHub token remains in the Nix configuration" >&2
+            exit 1
+          fi
+
+      - name: Build
+        run: nix develop --command just build
+
+      - name: Lint
+        run: nix develop --command just lint
+
+      - name: Test
+        run: nix develop --command just test
