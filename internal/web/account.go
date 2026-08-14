@@ -31,6 +31,23 @@ type errorResponse struct {
 	Collections []string `json:"collections,omitempty"`
 }
 
+type accountResponse struct {
+	DID           string                           `json:"did"`
+	Handle        string                           `json:"handle,omitempty"`
+	PDS           string                           `json:"pds"`
+	Authoritative string                           `json:"authoritative,omitempty"`
+	DisplayName   string                           `json:"displayName,omitempty"`
+	Description   string                           `json:"description,omitempty"`
+	Avatar        string                           `json:"avatar,omitempty"`
+	Profiles      map[string]profileRecordResponse `json:"profiles"`
+}
+
+type profileRecordResponse struct {
+	URI   string          `json:"uri"`
+	CID   string          `json:"cid,omitempty"`
+	Value json.RawMessage `json:"value"`
+}
+
 func handleAccount(accounts accountLookup) http.HandlerFunc {
 	return func(w http.ResponseWriter, request *http.Request) {
 		w.Header().Add("Vary", "Accept")
@@ -78,20 +95,20 @@ func handleAccount(accounts accountLookup) http.HandlerFunc {
 			return
 		}
 		if all || len(collections) > 0 {
-			writeJSON(w, http.StatusOK, account)
+			writeAccountJSON(w, http.StatusOK, &account)
 			return
 		}
 		if account.Authoritative != "" {
 			for _, record := range account.Profiles {
 				if record.Collection == account.Authoritative {
 					account.Profiles = []profile.Record{record}
-					writeJSON(w, http.StatusOK, account)
+					writeAccountJSON(w, http.StatusOK, &account)
 					return
 				}
 			}
 		}
 		if len(account.Profiles) == 1 {
-			writeJSON(w, http.StatusOK, account)
+			writeAccountJSON(w, http.StatusOK, &account)
 			return
 		}
 
@@ -222,6 +239,53 @@ func writeError(
 		Message:     message,
 		Collections: collections,
 	})
+}
+
+func writeAccountJSON(w http.ResponseWriter, status int, account *profile.Account) {
+	response, err := newAccountResponse(account)
+	if err != nil {
+		slog.Error("build account response", "error", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"internal_error",
+			"failed to encode response",
+			nil,
+		)
+		return
+	}
+	writeJSON(w, status, response)
+}
+
+func newAccountResponse(account *profile.Account) (accountResponse, error) {
+	profiles := make(map[string]profileRecordResponse, len(account.Profiles))
+	for _, record := range account.Profiles {
+		if record.Collection == "" {
+			return accountResponse{}, fmt.Errorf("profile collection is empty")
+		}
+		if _, exists := profiles[record.Collection]; exists {
+			return accountResponse{}, fmt.Errorf(
+				"duplicate profile collection: %s",
+				record.Collection,
+			)
+		}
+		profiles[record.Collection] = profileRecordResponse{
+			URI:   record.URI,
+			CID:   record.CID,
+			Value: record.Value,
+		}
+	}
+
+	return accountResponse{
+		DID:           account.DID,
+		Handle:        account.Handle,
+		PDS:           account.PDS,
+		Authoritative: account.Authoritative,
+		DisplayName:   account.DisplayName,
+		Description:   account.Description,
+		Avatar:        account.Avatar,
+		Profiles:      profiles,
+	}, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

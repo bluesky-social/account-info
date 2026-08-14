@@ -24,6 +24,23 @@ type fakeAccountLookup struct {
 	selected    []string
 }
 
+type decodedAccountResponse struct {
+	DID           string                            `json:"did"`
+	Handle        string                            `json:"handle"`
+	PDS           string                            `json:"pds"`
+	Authoritative string                            `json:"authoritative"`
+	DisplayName   string                            `json:"displayName"`
+	Description   string                            `json:"description"`
+	Avatar        string                            `json:"avatar"`
+	Profiles      map[string]decodedProfileResponse `json:"profiles"`
+}
+
+type decodedProfileResponse struct {
+	URI   string          `json:"uri"`
+	CID   string          `json:"cid"`
+	Value json.RawMessage `json:"value"`
+}
+
 func (f *fakeAccountLookup) Collections() []string {
 	return f.collections
 }
@@ -231,7 +248,7 @@ func TestAccountHandlerReturnsAuthoritativeProfile(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Equal(t, "alice.example", lookup.identifier)
-	var body profile.Account
+	var body decodedAccountResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Equal(t, lookup.account.DID, body.DID)
 	require.Equal(t, "app.bsky.actor.profile", body.Authoritative)
@@ -243,7 +260,16 @@ func TestAccountHandlerReturnsAuthoritativeProfile(t *testing.T) {
 		body.Avatar,
 	)
 	require.Len(t, body.Profiles, 1)
-	require.Equal(t, "app.bsky.actor.profile", body.Profiles[0].Collection)
+	require.Equal(
+		t,
+		lookup.account.Profiles[0].URI,
+		body.Profiles["app.bsky.actor.profile"].URI,
+	)
+	var raw struct {
+		Profiles map[string]map[string]json.RawMessage `json:"profiles"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &raw))
+	require.NotContains(t, raw.Profiles["app.bsky.actor.profile"], "collection")
 }
 
 func TestAccountHandlerReturnsAllProfiles(t *testing.T) {
@@ -254,10 +280,17 @@ func TestAccountHandlerReturnsAllProfiles(t *testing.T) {
 	response := requestAccount(t, lookup, "/alice.example?all=true")
 
 	require.Equal(t, http.StatusOK, response.Code)
-	var body profile.Account
+	var body decodedAccountResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Equal(t, "app.bsky.actor.profile", body.Authoritative)
-	require.Len(t, body.Profiles, 2)
+	require.Equal(
+		t,
+		map[string]decodedProfileResponse{
+			"app.bsky.actor.profile": decodedProfile(lookup.account.Profiles[0]),
+			"org.example.profile":    decodedProfile(lookup.account.Profiles[1]),
+		},
+		body.Profiles,
+	)
 }
 
 func TestAccountHandlerFiltersCollections(t *testing.T) {
@@ -276,9 +309,24 @@ func TestAccountHandlerFiltersCollections(t *testing.T) {
 		[]string{"app.bsky.actor.profile"},
 		lookup.selected,
 	)
-	var body profile.Account
+	var body decodedAccountResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Len(t, body.Profiles, 1)
+	require.Contains(t, body.Profiles, "app.bsky.actor.profile")
+}
+
+func TestAccountHandlerRejectsDuplicateProfileCollections(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(2)}
+	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Profiles[1].Collection = "app.bsky.actor.profile"
+	response := requestAccount(t, lookup, "/alice.example?all=true")
+
+	require.Equal(t, http.StatusInternalServerError, response.Code)
+	var body errorResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Equal(t, "internal_error", body.Error)
 }
 
 func TestAccountHandlerErrors(t *testing.T) {
@@ -429,4 +477,12 @@ func testAccount(profileCount int) profile.Account {
 		})
 	}
 	return account
+}
+
+func decodedProfile(record profile.Record) decodedProfileResponse {
+	return decodedProfileResponse{
+		URI:   record.URI,
+		CID:   record.CID,
+		Value: record.Value,
+	}
 }
