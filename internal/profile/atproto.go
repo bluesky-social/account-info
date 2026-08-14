@@ -265,7 +265,11 @@ func blobURL(pds, did, cid string) (string, error) {
 }
 
 // NewDefaultService uses Bluesky profiles as the temporary authority policy.
-func NewDefaultService() *Service {
+func NewDefaultService(cacheConfig CacheConfig) (*Service, error) {
+	if err := cacheConfig.validate(); err != nil {
+		return nil, err
+	}
+
 	// One public-only client is shared by identity resolution and record
 	// reads: every outbound host (PLC directory aside, handle domains, DID
 	// service endpoints, PDS hosts) is account-controlled input.
@@ -277,7 +281,7 @@ func NewDefaultService() *Service {
 			},
 		},
 	}
-	return NewService(
+	service := NewService(
 		resolver,
 		&atprotoRecordReader{httpClient: httpClient},
 		bsky.NSIDActorProfile,
@@ -287,4 +291,10 @@ func NewDefaultService() *Service {
 			Extract:    extractBlueskyProfile,
 		},
 	)
+	service.cache = newAccountCache(
+		cacheConfig.TTL,
+		cacheConfig.ErrorTTL,
+		cacheConfig.MaxEntries,
+	)
+	return service, nil
 }

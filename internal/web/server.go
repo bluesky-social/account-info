@@ -13,10 +13,25 @@ import (
 )
 
 // Serve starts the HTTP server and blocks until it stops or ctx is canceled.
-func Serve(ctx context.Context, address string) error {
+func Serve(
+	ctx context.Context,
+	address string,
+	cacheTTL time.Duration,
+	cacheErrorTTL time.Duration,
+	cacheMaxEntries int,
+) error {
+	accounts, err := profile.NewDefaultService(profile.CacheConfig{
+		TTL:        cacheTTL,
+		ErrorTTL:   cacheErrorTTL,
+		MaxEntries: cacheMaxEntries,
+	})
+	if err != nil {
+		return fmt.Errorf("configure account cache: %w", err)
+	}
+
 	server := &http.Server{
 		Addr:              address,
-		Handler:           routes(profile.NewDefaultService()),
+		Handler:           routes(accounts),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,

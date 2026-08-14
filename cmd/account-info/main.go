@@ -7,12 +7,27 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/bluesky-social/account-info/internal/web"
 	"github.com/urfave/cli/v3"
 )
 
 const exitFailure = 1
+
+const (
+	defaultCacheTTL        = 5 * time.Minute
+	defaultCacheErrorTTL   = 30 * time.Second
+	defaultCacheMaxEntries = 1_000_000
+)
+
+type serveFunc func(
+	context.Context,
+	string,
+	time.Duration,
+	time.Duration,
+	int,
+) error
 
 func main() {
 	ctx, stop := signal.NotifyContext(
@@ -21,7 +36,18 @@ func main() {
 		syscall.SIGTERM,
 	)
 
-	cmd := &cli.Command{
+	cmd := newCommand(web.Serve)
+
+	err := cmd.Run(ctx, os.Args)
+	stop()
+	if err != nil {
+		slog.Error("account-info stopped", "error", err)
+		os.Exit(exitFailure)
+	}
+}
+
+func newCommand(serve serveFunc) *cli.Command {
+	return &cli.Command{
 		Name:  "account-info",
 		Usage: "serve AT Protocol account information",
 		Flags: []cli.Flag{
@@ -32,16 +58,33 @@ func main() {
 				Usage:   "HTTP server listen address",
 				Sources: cli.EnvVars("ACCOUNT_INFO_ADDRESS"),
 			},
+			&cli.DurationFlag{
+				Name:    "cache-ttl",
+				Value:   defaultCacheTTL,
+				Usage:   "TTL for successful account lookups",
+				Sources: cli.EnvVars("ACCOUNT_INFO_CACHE_TTL"),
+			},
+			&cli.DurationFlag{
+				Name:    "cache-error-ttl",
+				Value:   defaultCacheErrorTTL,
+				Usage:   "TTL for failed account lookups",
+				Sources: cli.EnvVars("ACCOUNT_INFO_CACHE_ERROR_TTL"),
+			},
+			&cli.IntFlag{
+				Name:    "cache-max-entries",
+				Value:   defaultCacheMaxEntries,
+				Usage:   "maximum number of cached account lookups",
+				Sources: cli.EnvVars("ACCOUNT_INFO_CACHE_MAX_ENTRIES"),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return web.Serve(ctx, cmd.String("address"))
+			return serve(
+				ctx,
+				cmd.String("address"),
+				cmd.Duration("cache-ttl"),
+				cmd.Duration("cache-error-ttl"),
+				cmd.Int("cache-max-entries"),
+			)
 		},
-	}
-
-	err := cmd.Run(ctx, os.Args)
-	stop()
-	if err != nil {
-		slog.Error("account-info stopped", "error", err)
-		os.Exit(exitFailure)
 	}
 }

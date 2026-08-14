@@ -101,6 +101,7 @@ type Service struct {
 	authoritative string
 	sources       map[string]Source
 	order         []string
+	cache         *accountCache
 }
 
 // NewService constructs a profile service with a temporary authority policy.
@@ -160,6 +161,26 @@ func (s *Service) Collections() []string {
 
 // Lookup resolves an account and retrieves its selected profile records.
 func (s *Service) Lookup(
+	ctx context.Context,
+	identifier string,
+	collections []string,
+) (Account, error) {
+	if s.cache != nil {
+		if account, err, ok := s.cache.get(identifier, collections); ok {
+			return account, err
+		}
+	}
+
+	account, err := s.lookup(ctx, identifier, collections)
+	if s.cache != nil &&
+		!errors.Is(err, context.Canceled) &&
+		!errors.Is(err, context.DeadlineExceeded) {
+		s.cache.put(identifier, collections, &account, err)
+	}
+	return account, err
+}
+
+func (s *Service) lookup(
 	ctx context.Context,
 	identifier string,
 	collections []string,
