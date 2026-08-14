@@ -22,8 +22,10 @@ func (f *fakeResolver) Resolve(
 }
 
 type fakeReader struct {
-	records map[string]Record
-	errors  map[string]error
+	records   map[string]Record
+	errors    map[string]error
+	avatar    Avatar
+	avatarErr error
 }
 
 func (f *fakeReader) Get(
@@ -39,6 +41,14 @@ func (f *fakeReader) Get(
 		return Record{}, ErrRecordNotFound
 	}
 	return record, nil
+}
+
+func (f *fakeReader) GetBlob(
+	_ context.Context,
+	_ Identity,
+	_ BlobRef,
+) (Avatar, error) {
+	return f.avatar, f.avatarErr
 }
 
 func TestServiceLookup(t *testing.T) {
@@ -165,6 +175,79 @@ func TestBlueskyProfileSummary(t *testing.T) {
 			"?cid=bafycid&did=did%3Aplc%3Aalice",
 		summary.Avatar,
 	)
+	require.Equal(t, &BlobRef{
+		CID:         "bafycid",
+		ContentType: "image/jpeg",
+		Size:        123,
+	}, summary.AvatarRef)
+}
+
+func TestServiceAvatar(t *testing.T) {
+	t.Parallel()
+
+	want := Avatar{Content: []byte("image"), ContentType: "image/jpeg", CID: "bafycid"}
+	reader := &fakeReader{
+		records: map[string]Record{
+			"app.example.profile": {
+				Collection: "app.example.profile",
+				Value:      json.RawMessage(`{"avatar":true}`),
+			},
+		},
+		avatar: want,
+	}
+	service := NewService(
+		&fakeResolver{identity: Identity{DID: "did:plc:alice", PDS: "https://pds.example"}},
+		reader,
+		"app.example.profile",
+		Source{
+			Collection: "app.example.profile",
+			RecordKey:  "self",
+			Extract: func(Identity, json.RawMessage) (Summary, error) {
+				return Summary{AvatarRef: &BlobRef{
+					CID:         "bafycid",
+					ContentType: "image/jpeg",
+					Size:        5,
+				}}, nil
+			},
+		},
+	)
+
+	got, err := service.Avatar(context.Background(), "alice.example")
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestServiceAvatarErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		records map[string]Record
+		extract func(Identity, json.RawMessage) (Summary, error)
+		want    error
+	}{
+		{name: "profile missing", records: map[string]Record{}, want: ErrProfileNotFound},
+		{
+			name:    "avatar missing",
+			records: map[string]Record{"app.example.profile": {Collection: "app.example.profile"}},
+			extract: func(Identity, json.RawMessage) (Summary, error) { return Summary{}, nil },
+			want:    ErrAvatarNotFound,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			service := NewService(
+				&fakeResolver{identity: Identity{DID: "did:plc:alice", PDS: "https://pds.example"}},
+				&fakeReader{records: test.records},
+				"app.example.profile",
+				Source{Collection: "app.example.profile", RecordKey: "self", Extract: test.extract},
+			)
+			_, err := service.Avatar(context.Background(), "alice.example")
+			require.ErrorIs(t, err, test.want)
+		})
+	}
 }
 
 func TestBlobURLRejectsInvalidPDS(t *testing.T) {

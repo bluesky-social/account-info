@@ -1,12 +1,14 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -20,6 +22,7 @@ const lookupTimeout = 25 * time.Second
 type accountLookup interface {
 	Collections() []string
 	Lookup(context.Context, string, []string) (profile.Account, error)
+	Avatar(context.Context, string) (profile.Avatar, error)
 }
 
 type errorResponse struct {
@@ -30,6 +33,17 @@ type errorResponse struct {
 
 func handleAccount(accounts accountLookup) http.HandlerFunc {
 	return func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Add("Vary", "Accept")
+		if prefersImage(request.Header.Values("Accept")) {
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			http.Redirect(
+				w,
+				request,
+				"/avatar/"+url.PathEscape(request.PathValue("identifier")),
+				http.StatusTemporaryRedirect,
+			)
+			return
+		}
 		all, err := parseAll(request)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_query", err.Error(), nil)
@@ -95,6 +109,41 @@ func handleAccount(accounts accountLookup) http.HandlerFunc {
 	}
 }
 
+func handleAvatar(accounts accountLookup) http.HandlerFunc {
+	return func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		ctx, cancel := context.WithTimeout(request.Context(), lookupTimeout)
+		defer cancel()
+
+		avatar, err := accounts.Avatar(ctx, request.PathValue("identifier"))
+		if err != nil {
+			writeLookupError(w, err, accounts.Collections())
+			return
+		}
+
+		extension := ".bin"
+		switch avatar.ContentType {
+		case "image/jpeg":
+			extension = ".jpg"
+		case "image/png":
+			extension = ".png"
+		}
+		w.Header().Set("Content-Type", avatar.ContentType)
+		w.Header().Set("Content-Disposition", "inline; filename=avatar"+extension)
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("ETag", strconv.Quote(avatar.CID))
+		http.ServeContent(
+			w,
+			request,
+			"avatar"+extension,
+			time.Time{},
+			bytes.NewReader(avatar.Content),
+		)
+	}
+}
+
 func parseAll(request *http.Request) (bool, error) {
 	raw := request.URL.Query().Get("all")
 	if raw == "" {
@@ -133,6 +182,12 @@ func writeLookupError(
 			err.Error(),
 			collections,
 		)
+	case errors.Is(err, profile.ErrProfileNotFound):
+		writeError(w, http.StatusNotFound, "profile_not_found", err.Error(), nil)
+	case errors.Is(err, profile.ErrAvatarNotFound):
+		writeError(w, http.StatusNotFound, "avatar_not_found", err.Error(), nil)
+	case errors.Is(err, profile.ErrMultipleProfiles):
+		writeError(w, http.StatusConflict, "multiple_profiles", err.Error(), nil)
 	case errors.Is(err, context.DeadlineExceeded):
 		slog.Warn("profile lookup timed out", "error", err)
 		writeError(
@@ -161,6 +216,7 @@ func writeError(
 	message string,
 	collections []string,
 ) {
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, status, errorResponse{
 		Error:       code,
 		Message:     message,

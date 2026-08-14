@@ -15,9 +15,12 @@ import (
 
 type fakeAccountLookup struct {
 	account     profile.Account
+	avatar      profile.Avatar
 	err         error
+	avatarErr   error
 	collections []string
 	identifier  string
+	avatarID    string
 	selected    []string
 }
 
@@ -33,6 +36,187 @@ func (f *fakeAccountLookup) Lookup(
 	f.identifier = identifier
 	f.selected = collections
 	return f.account, f.err
+}
+
+func (f *fakeAccountLookup) Avatar(
+	_ context.Context,
+	identifier string,
+) (profile.Avatar, error) {
+	f.avatarID = identifier
+	return f.avatar, f.avatarErr
+}
+
+func TestAccountHandlerRedirectsPreferredImageRepresentation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		accept string
+		status int
+	}{
+		{name: "image wildcard", accept: "image/*", status: http.StatusTemporaryRedirect},
+		{
+			name:   "browser image request",
+			accept: "image/avif,image/webp,image/*,*/*;q=0.8",
+			status: http.StatusTemporaryRedirect,
+		},
+		{name: "curl default", accept: "*/*", status: http.StatusOK},
+		{name: "JSON preferred", accept: "image/*;q=0.5, application/json;q=0.9", status: http.StatusOK},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			lookup := &fakeAccountLookup{account: testAccount(1)}
+			lookup.account.Authoritative = "app.bsky.actor.profile"
+			response := requestAccountWithAccept(
+				t,
+				lookup,
+				"/alice.example",
+				test.accept,
+			)
+
+			require.Equal(t, test.status, response.Code)
+			require.Equal(t, "Accept", response.Header().Get("Vary"))
+			if test.status == http.StatusTemporaryRedirect {
+				require.Equal(t, "/avatar/alice.example", response.Header().Get("Location"))
+				require.Equal(t, "public, max-age=300", response.Header().Get("Cache-Control"))
+			}
+		})
+	}
+}
+
+func TestAvatarHandlerServesCacheableImage(t *testing.T) {
+	t.Parallel()
+
+	content := []byte("verified image bytes")
+	lookup := &fakeAccountLookup{avatar: profile.Avatar{
+		Content:     content,
+		ContentType: "image/png",
+		CID:         "bafkreicid",
+	}}
+	response := requestAccountWithAccept(
+		t,
+		lookup,
+		"/avatar/alice.example",
+		"application/json",
+	)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "alice.example", lookup.avatarID)
+	require.Equal(t, content, response.Body.Bytes())
+	require.Equal(t, "image/png", response.Header().Get("Content-Type"))
+	require.Equal(t, `"bafkreicid"`, response.Header().Get("ETag"))
+	require.Equal(t, "inline; filename=avatar.png", response.Header().Get("Content-Disposition"))
+	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
+	require.Equal(t, "*", response.Header().Get("Access-Control-Allow-Origin"))
+	require.Equal(
+		t,
+		"public, max-age=300",
+		response.Header().Get("Cache-Control"),
+	)
+	require.Empty(t, response.Header().Get("Vary"))
+}
+
+func TestAvatarHandlerHonorsConditionalRequest(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{avatar: profile.Avatar{
+		Content:     []byte("verified image bytes"),
+		ContentType: "image/jpeg",
+		CID:         "bafkreicid",
+	}}
+	request := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"/avatar/alice.example",
+		http.NoBody,
+	)
+	request.Header.Set("If-None-Match", `"bafkreicid"`)
+	response := httptest.NewRecorder()
+	routes(lookup).ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusNotModified, response.Code)
+	require.Empty(t, response.Body.Bytes())
+}
+
+func TestAvatarHandlerSupportsHeadAndRanges(t *testing.T) {
+	t.Parallel()
+
+	avatar := profile.Avatar{
+		Content:     []byte("verified image bytes"),
+		ContentType: "image/jpeg",
+		CID:         "bafkreicid",
+	}
+	tests := []struct {
+		name        string
+		method      string
+		rangeHeader string
+		status      int
+		body        string
+	}{
+		{name: "head", method: http.MethodHead, status: http.StatusOK},
+		{
+			name:        "range",
+			method:      http.MethodGet,
+			rangeHeader: "bytes=9-13",
+			status:      http.StatusPartialContent,
+			body:        "image",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			request := httptest.NewRequestWithContext(
+				context.Background(),
+				test.method,
+				"/avatar/alice.example",
+				http.NoBody,
+			)
+			if test.rangeHeader != "" {
+				request.Header.Set("Range", test.rangeHeader)
+			}
+			response := httptest.NewRecorder()
+			routes(&fakeAccountLookup{avatar: avatar}).ServeHTTP(response, request)
+
+			require.Equal(t, test.status, response.Code)
+			require.Equal(t, test.body, response.Body.String())
+			require.Equal(t, "bytes", response.Header().Get("Accept-Ranges"))
+		})
+	}
+}
+
+func TestAvatarHandlerErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "profile missing", err: profile.ErrProfileNotFound, status: http.StatusNotFound, code: "profile_not_found"},
+		{name: "avatar missing", err: profile.ErrAvatarNotFound, status: http.StatusNotFound, code: "avatar_not_found"},
+		{name: "ambiguous profile", err: profile.ErrMultipleProfiles, status: http.StatusConflict, code: "multiple_profiles"},
+		{name: "upstream failure", err: errors.New("blob failed"), status: http.StatusBadGateway, code: "upstream_error"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			response := requestAccount(
+				t,
+				&fakeAccountLookup{avatarErr: test.err},
+				"/avatar/alice.example",
+			)
+			require.Equal(t, test.status, response.Code)
+			var body errorResponse
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+			require.Equal(t, test.code, body.Error)
+			require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+		})
+	}
 }
 
 func TestAccountHandlerReturnsAuthoritativeProfile(t *testing.T) {
@@ -202,6 +386,15 @@ func requestAccount(
 	lookup accountLookup,
 	target string,
 ) *httptest.ResponseRecorder {
+	return requestAccountWithAccept(t, lookup, target, "")
+}
+
+func requestAccountWithAccept(
+	t *testing.T,
+	lookup accountLookup,
+	target string,
+	accept string,
+) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequestWithContext(
 		context.Background(),
@@ -209,6 +402,9 @@ func requestAccount(
 		target,
 		http.NoBody,
 	)
+	if accept != "" {
+		request.Header.Set("Accept", accept)
+	}
 	response := httptest.NewRecorder()
 	routes(lookup).ServeHTTP(response, request)
 	return response

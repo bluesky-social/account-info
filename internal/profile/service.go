@@ -20,7 +20,27 @@ var (
 	ErrRecordNotFound = errors.New("record not found")
 	// ErrUnsupportedCollection indicates that a collection is not allowlisted.
 	ErrUnsupportedCollection = errors.New("unsupported profile collection")
+	// ErrProfileNotFound indicates that an account has no supported profile.
+	ErrProfileNotFound = errors.New("profile not found")
+	// ErrAvatarNotFound indicates that the selected profile has no avatar.
+	ErrAvatarNotFound = errors.New("avatar not found")
+	// ErrMultipleProfiles indicates that no authoritative profile can be selected.
+	ErrMultipleProfiles = errors.New("multiple profiles without an authority")
 )
+
+// BlobRef identifies an avatar blob declared by a profile record.
+type BlobRef struct {
+	CID         string
+	ContentType string
+	Size        int64
+}
+
+// Avatar is a verified profile image ready for an HTTP response.
+type Avatar struct {
+	Content     []byte
+	ContentType string
+	CID         string
+}
 
 // Source describes an allowlisted profile record type.
 type Source struct {
@@ -31,9 +51,10 @@ type Source struct {
 
 // Summary contains canonical fields extracted from the selected profile.
 type Summary struct {
-	DisplayName string `json:"displayName,omitempty"`
-	Description string `json:"description,omitempty"`
-	Avatar      string `json:"avatar,omitempty"`
+	DisplayName string   `json:"displayName,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Avatar      string   `json:"avatar,omitempty"`
+	AvatarRef   *BlobRef `json:"-"`
 }
 
 // Identity contains the account location needed to retrieve profile records.
@@ -61,6 +82,7 @@ type Account struct {
 	Description   string   `json:"description,omitempty"`
 	Avatar        string   `json:"avatar,omitempty"`
 	Profiles      []Record `json:"profiles"`
+	avatarRef     *BlobRef
 }
 
 type identityResolver interface {
@@ -69,6 +91,7 @@ type identityResolver interface {
 
 type recordReader interface {
 	Get(context.Context, Identity, Source) (Record, error)
+	GetBlob(context.Context, Identity, BlobRef) (Avatar, error)
 }
 
 // Service retrieves profile records from allowlisted collections.
@@ -101,6 +124,33 @@ func NewService(
 		service.sources[source.Collection] = source
 	}
 	return service
+}
+
+// Avatar resolves an account and retrieves its selected profile image.
+func (s *Service) Avatar(ctx context.Context, identifier string) (Avatar, error) {
+	account, err := s.Lookup(ctx, identifier, nil)
+	if err != nil {
+		return Avatar{}, err
+	}
+	if len(account.Profiles) == 0 {
+		return Avatar{}, ErrProfileNotFound
+	}
+	if account.Authoritative == "" && len(account.Profiles) > 1 {
+		return Avatar{}, ErrMultipleProfiles
+	}
+	if account.avatarRef == nil {
+		return Avatar{}, ErrAvatarNotFound
+	}
+
+	avatar, err := s.reader.GetBlob(ctx, Identity{
+		DID:    account.DID,
+		Handle: account.Handle,
+		PDS:    account.PDS,
+	}, *account.avatarRef)
+	if err != nil {
+		return Avatar{}, fmt.Errorf("get avatar: %w", err)
+	}
+	return avatar, nil
 }
 
 // Collections returns the allowlisted profile collections in lookup order.
@@ -168,6 +218,7 @@ func applySummary(account *Account, summary Summary) {
 	account.DisplayName = summary.DisplayName
 	account.Description = summary.Description
 	account.Avatar = summary.Avatar
+	account.avatarRef = summary.AvatarRef
 }
 
 func (s *Service) selectSources(collections []string) ([]Source, error) {
