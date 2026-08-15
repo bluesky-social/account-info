@@ -22,6 +22,8 @@ type fakeAccountLookup struct {
 	identifier  string
 	avatarID    string
 	selected    []string
+	lookupCalls int
+	avatarCalls int
 }
 
 type decodedAccountResponse struct {
@@ -50,6 +52,7 @@ func (f *fakeAccountLookup) Lookup(
 	identifier string,
 	collections []string,
 ) (profile.Account, error) {
+	f.lookupCalls++
 	f.identifier = identifier
 	f.selected = collections
 	return f.account, f.err
@@ -59,6 +62,7 @@ func (f *fakeAccountLookup) Avatar(
 	_ context.Context,
 	identifier string,
 ) (profile.Avatar, error) {
+	f.avatarCalls++
 	f.avatarID = identifier
 	return f.avatar, f.avatarErr
 }
@@ -410,7 +414,7 @@ func TestAvatarHandlerHonorsConditionalRequest(t *testing.T) {
 	)
 	request.Header.Set("If-None-Match", `"bafkreicid"`)
 	response := httptest.NewRecorder()
-	routes(lookup).ServeHTTP(response, request)
+	routes(lookup, nil).ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusNotModified, response.Code)
 	require.Empty(t, response.Body.Bytes())
@@ -454,7 +458,7 @@ func TestAvatarHandlerSupportsHeadAndRanges(t *testing.T) {
 				request.Header.Set("Range", test.rangeHeader)
 			}
 			response := httptest.NewRecorder()
-			routes(&fakeAccountLookup{avatar: avatar}).ServeHTTP(response, request)
+			routes(&fakeAccountLookup{avatar: avatar}, nil).ServeHTTP(response, request)
 
 			require.Equal(t, test.status, response.Code)
 			require.Equal(t, test.body, response.Body.String())
@@ -726,7 +730,7 @@ func requestAccountWithHeaders(
 		request.Header.Set("User-Agent", userAgent)
 	}
 	response := httptest.NewRecorder()
-	routes(lookup).ServeHTTP(response, request)
+	routes(lookup, nil).ServeHTTP(response, request)
 	return response
 }
 

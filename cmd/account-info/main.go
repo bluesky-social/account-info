@@ -19,6 +19,7 @@ const (
 	defaultCacheTTL        = 5 * time.Minute
 	defaultCacheErrorTTL   = 30 * time.Second
 	defaultCacheMaxEntries = 1_000_000
+	defaultLookupRateLimit = 3
 )
 
 type serveFunc func(
@@ -26,6 +27,7 @@ type serveFunc func(
 	string,
 	time.Duration,
 	time.Duration,
+	int,
 	int,
 ) error
 
@@ -76,6 +78,12 @@ func newCommand(serve serveFunc) *cli.Command {
 				Usage:   "maximum number of cached account lookups",
 				Sources: cli.EnvVars("ACCOUNT_INFO_CACHE_MAX_ENTRIES"),
 			},
+			&cli.IntFlag{
+				Name:    "lookup-rate-limit",
+				Value:   defaultLookupRateLimit,
+				Usage:   "lookup requests allowed per second per source IP (0 disables)",
+				Sources: cli.EnvVars("ACCOUNT_INFO_LOOKUP_RATE_LIMIT"),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return serve(
@@ -84,6 +92,7 @@ func newCommand(serve serveFunc) *cli.Command {
 				cmd.Duration("cache-ttl"),
 				cmd.Duration("cache-error-ttl"),
 				cmd.Int("cache-max-entries"),
+				cmd.Int("lookup-rate-limit"),
 			)
 		},
 	}

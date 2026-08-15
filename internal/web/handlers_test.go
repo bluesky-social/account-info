@@ -35,7 +35,7 @@ func TestBasicRoutes(t *testing.T) {
 			)
 			response := httptest.NewRecorder()
 
-			routes(accounts).ServeHTTP(response, request)
+			routes(accounts, nil).ServeHTTP(response, request)
 
 			require.Equal(t, http.StatusOK, response.Code)
 			require.Equal(t, test.body, response.Body.String())
@@ -59,7 +59,7 @@ func TestRootExplainsService(t *testing.T) {
 	)
 	response := httptest.NewRecorder()
 
-	routes(&fakeAccountLookup{}).ServeHTTP(response, request)
+	routes(&fakeAccountLookup{}, nil).ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Equal(
@@ -121,7 +121,7 @@ func TestLookupRedirectsToExactIdentifier(t *testing.T) {
 			)
 			response := httptest.NewRecorder()
 
-			routes(lookup).ServeHTTP(response, request)
+			routes(lookup, nil).ServeHTTP(response, request)
 
 			require.Equal(t, http.StatusSeeOther, response.Code)
 			require.Equal(t, test.location, response.Header().Get("Location"))
@@ -142,7 +142,7 @@ func TestLookupRejectsEmptyIdentifier(t *testing.T) {
 	)
 	response := httptest.NewRecorder()
 
-	routes(&fakeAccountLookup{}).ServeHTTP(response, request)
+	routes(&fakeAccountLookup{}, nil).ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusBadRequest, response.Code)
 }
@@ -158,7 +158,7 @@ func TestUnmatchedPathReturnsNotFound(t *testing.T) {
 	)
 	response := httptest.NewRecorder()
 
-	routes(&fakeAccountLookup{}).ServeHTTP(response, request)
+	routes(&fakeAccountLookup{}, nil).ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusNotFound, response.Code)
 }
@@ -174,7 +174,7 @@ func TestAppIcon(t *testing.T) {
 	)
 	response := httptest.NewRecorder()
 
-	routes(&fakeAccountLookup{}).ServeHTTP(response, request)
+	routes(&fakeAccountLookup{}, nil).ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Equal(t, "image/svg+xml", response.Header().Get("Content-Type"))
@@ -193,7 +193,7 @@ func TestUnknownAppIconReturnsNotFound(t *testing.T) {
 	)
 	response := httptest.NewRecorder()
 
-	routes(&fakeAccountLookup{}).ServeHTTP(response, request)
+	routes(&fakeAccountLookup{}, nil).ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusNotFound, response.Code)
 }

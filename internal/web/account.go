@@ -90,7 +90,7 @@ func handleAccount(accounts accountLookup) http.HandlerFunc {
 		if err != nil {
 			if representation == representationHTML {
 				failure := classifyLookupFailure(err, accounts.Collections())
-				logLookupFailure(failure, err)
+				logLookupFailure(&failure, err)
 				writeIndexHTML(w, failure.status, indexPage{
 					Identifier:  request.PathValue("identifier"),
 					LookupError: failure.htmlMessage,
@@ -178,7 +178,7 @@ func writeLookupError(
 	collections []string,
 ) {
 	failure := classifyLookupFailure(err, collections)
-	logLookupFailure(failure, err)
+	logLookupFailure(&failure, err)
 	writeError(
 		w,
 		failure.status,
@@ -262,7 +262,7 @@ func classifyLookupFailure(err error, collections []string) lookupFailure {
 	}
 }
 
-func logLookupFailure(failure lookupFailure, err error) {
+func logLookupFailure(failure *lookupFailure, err error) {
 	if failure.logMessage == "" {
 		return
 	}

@@ -28,15 +28,18 @@ type indexPage struct {
 	LookupError string
 }
 
-func routes(accounts accountLookup) http.Handler {
+func routes(
+	accounts accountLookup,
+	limiter *sourceIPLimiter,
+) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", handleRoot)
 	mux.HandleFunc("GET /lookup", handleLookup)
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /assets/favicon.svg", handleFavicon)
 	mux.HandleFunc("GET /assets/apps/{file}", handleAppIcon)
-	mux.HandleFunc("GET /avatar/{identifier}", handleAvatar(accounts))
-	mux.HandleFunc("GET /{identifier}", handleAccount(accounts))
+	mux.Handle("GET /avatar/{identifier}", limitLookups(limiter, handleAvatar(accounts)))
+	mux.Handle("GET /{identifier}", limitLookups(limiter, handleAccount(accounts)))
 	return mux
 }
 

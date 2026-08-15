@@ -19,7 +19,20 @@ func Serve(
 	cacheTTL time.Duration,
 	cacheErrorTTL time.Duration,
 	cacheMaxEntries int,
+	lookupRateLimit int,
 ) error {
+	var limiter *sourceIPLimiter
+	if lookupRateLimit < 0 {
+		return fmt.Errorf("lookup rate limit must not be negative: %d", lookupRateLimit)
+	}
+	if lookupRateLimit > 0 {
+		var err error
+		limiter, err = newSourceIPLimiter(lookupRateLimit, maxRateLimitSourceIPs)
+		if err != nil {
+			return fmt.Errorf("configure lookup rate limiter: %w", err)
+		}
+	}
+
 	accounts, err := profile.NewDefaultService(profile.CacheConfig{
 		TTL:        cacheTTL,
 		ErrorTTL:   cacheErrorTTL,
@@ -31,7 +44,7 @@ func Serve(
 
 	server := &http.Server{
 		Addr:              address,
-		Handler:           routes(accounts),
+		Handler:           routes(accounts, limiter),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -39,7 +52,11 @@ func Serve(
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("HTTP server listening", "address", address)
+		slog.Info(
+			"HTTP server listening",
+			"address", address,
+			"lookup_rate_limit", lookupRateLimit,
+		)
 		errCh <- server.ListenAndServe()
 	}()
 
