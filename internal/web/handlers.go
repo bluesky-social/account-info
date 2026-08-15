@@ -37,6 +37,7 @@ func routes(
 	mux.HandleFunc("GET /lookup", handleLookup)
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /assets/apps/{file}", handleAppIcon)
+	mux.Handle("GET /avatar/{identifier}/{file}", limitLookups(limiter, handleAvatar(accounts)))
 	mux.Handle("GET /avatar/{identifier}", limitLookups(limiter, handleAvatar(accounts)))
 	mux.Handle("GET /{identifier}", limitLookups(limiter, handleAccount(accounts)))
 	return mux

@@ -259,6 +259,43 @@ func TestServiceAvatar(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestServiceLookupExposesAvatarContentType(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(
+		&fakeResolver{identity: Identity{
+			DID:    "did:plc:alice",
+			Handle: "alice.example",
+			PDS:    "https://pds.example",
+		}},
+		&fakeReader{records: map[string]Record{
+			"app.example.profile": {
+				Collection: "app.example.profile",
+				Value:      json.RawMessage(`{"avatar":true}`),
+			},
+		}},
+		"app.example.profile",
+		Source{
+			Collection: "app.example.profile",
+			RecordKey:  "self",
+			Extract: func(Identity, json.RawMessage) (Summary, error) {
+				return Summary{
+					Avatar: "https://pds.example/avatar",
+					AvatarRef: &BlobRef{
+						CID:         "bafycid",
+						ContentType: "image/png",
+						Size:        123,
+					},
+				}, nil
+			},
+		},
+	)
+
+	account, err := service.Lookup(context.Background(), "alice.example", nil)
+	require.NoError(t, err)
+	require.Equal(t, "image/png", account.AvatarContentType)
+}
+
 func TestServiceAvatarErrors(t *testing.T) {
 	t.Parallel()
 

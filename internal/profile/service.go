@@ -93,15 +93,18 @@ type Record struct {
 
 // Account contains a resolved identity and its available profile records.
 type Account struct {
-	DID           string   `json:"did"`
-	Handle        string   `json:"handle,omitempty"`
-	PDS           string   `json:"pds"`
-	Authoritative string   `json:"authoritative,omitempty"`
-	DisplayName   string   `json:"displayName,omitempty"`
-	Description   string   `json:"description,omitempty"`
-	Avatar        string   `json:"avatar,omitempty"`
-	Profiles      []Record `json:"profiles"`
-	avatarRef     *BlobRef
+	DID           string `json:"did"`
+	Handle        string `json:"handle,omitempty"`
+	PDS           string `json:"pds"`
+	Authoritative string `json:"authoritative,omitempty"`
+	DisplayName   string `json:"displayName,omitempty"`
+	Description   string `json:"description,omitempty"`
+	Avatar        string `json:"avatar,omitempty"`
+	// AvatarContentType describes Avatar without exposing the private blob
+	// reference in JSON. Web representations use it to build a typed image URL.
+	AvatarContentType string   `json:"-"`
+	Profiles          []Record `json:"profiles"`
+	avatarRef         *BlobRef
 }
 
 type identityResolver interface {
@@ -303,6 +306,10 @@ func applySummary(account *Account, summary Summary) {
 	account.Description = summary.Description
 	account.Avatar = summary.Avatar
 	account.avatarRef = summary.AvatarRef
+	account.AvatarContentType = ""
+	if summary.AvatarRef != nil {
+		account.AvatarContentType = summary.AvatarRef.ContentType
+	}
 }
 
 func (s *Service) selectSources(collections []string) ([]Source, error) {

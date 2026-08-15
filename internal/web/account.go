@@ -139,6 +139,11 @@ type lookupFailure struct {
 
 func handleAvatar(accounts accountLookup) http.HandlerFunc {
 	return func(w http.ResponseWriter, request *http.Request) {
+		if file := request.PathValue("file"); file != "" &&
+			file != "profile.jpg" && file != "profile.png" {
+			http.NotFound(w, request)
+			return
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 

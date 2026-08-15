@@ -21,21 +21,22 @@ var accountTemplate = template.Must(template.New("account.html").Parse(accountHT
 const publicOrigin = "https://account.info"
 
 type accountPage struct {
-	Styles          template.CSS
-	Title           string
-	Label           string
-	Heading         string
-	DID             string
-	Handle          string
-	PDS             string
-	Description     string
-	MetaDescription string
-	CanonicalURL    string
-	AvatarPath      string
-	AvatarURL       string
-	AvatarAlt       string
-	HasDefault      bool
-	Profiles        []accountPageProfile
+	Styles            template.CSS
+	Title             string
+	Label             string
+	Heading           string
+	DID               string
+	Handle            string
+	PDS               string
+	Description       string
+	MetaDescription   string
+	CanonicalURL      string
+	AvatarPath        string
+	AvatarURL         string
+	AvatarAlt         string
+	AvatarContentType string
+	HasDefault        bool
+	Profiles          []accountPageProfile
 }
 
 type accountPageProfile struct {
@@ -120,9 +121,14 @@ func newAccountPage(account *profile.Account) (accountPage, error) {
 		Profiles:        make([]accountPageProfile, 0, len(account.Profiles)),
 	}
 	if account.Avatar != "" {
-		page.AvatarPath = "/avatar/" + escapedLabel
+		filename, err := avatarFilename(account.AvatarContentType)
+		if err != nil {
+			return accountPage{}, err
+		}
+		page.AvatarPath = "/avatar/" + escapedLabel + "/" + filename
 		page.AvatarURL = publicOrigin + page.AvatarPath
 		page.AvatarAlt = heading + " avatar"
+		page.AvatarContentType = account.AvatarContentType
 	}
 
 	seen := make(map[string]struct{}, len(account.Profiles))
@@ -173,6 +179,17 @@ func newAccountPage(account *profile.Account) (accountPage, error) {
 		)
 	}
 	return page, nil
+}
+
+func avatarFilename(contentType string) (string, error) {
+	switch contentType {
+	case "image/jpeg":
+		return "profile.jpg", nil
+	case "image/png":
+		return "profile.png", nil
+	default:
+		return "", fmt.Errorf("unsupported avatar content type %q", contentType)
+	}
 }
 
 func appIconPath(icon string) string {

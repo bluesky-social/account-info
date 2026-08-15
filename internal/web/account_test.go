@@ -116,6 +116,7 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	lookup.account.DisplayName = "Alice Example"
 	lookup.account.Description = "Builder of reliable systems."
 	lookup.account.Avatar = "https://pds.example/xrpc/com.atproto.sync.getBlob?secret=upstream"
+	lookup.account.AvatarContentType = "image/jpeg"
 	lookup.account.Profiles[0].CID = "bafydefault"
 	lookup.account.Profiles[0].App = &profile.AppLink{
 		Name: "Bluesky",
@@ -144,9 +145,13 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	require.Contains(t, body, `<meta property="og:title" content="Alice Example (@alice.example)">`)
 	require.Contains(t, body, `<meta property="og:description" content="Builder of reliable systems.">`)
 	require.Contains(t, body, `<meta property="og:url" content="https://account.info/alice.example">`)
-	require.Contains(t, body, `<meta property="og:image" content="https://account.info/avatar/alice.example">`)
+	require.Contains(t, body, `<meta property="og:image" content="https://account.info/avatar/alice.example/profile.jpg">`)
+	require.Contains(t, body, `<meta property="og:image:secure_url" content="https://account.info/avatar/alice.example/profile.jpg">`)
+	require.Contains(t, body, `<meta property="og:image:type" content="image/jpeg">`)
 	require.Contains(t, body, `<meta property="og:image:alt" content="Alice Example avatar">`)
 	require.Contains(t, body, `<meta name="twitter:card" content="summary">`)
+	require.Contains(t, body, `<meta name="twitter:image" content="https://account.info/avatar/alice.example/profile.jpg">`)
+	require.Contains(t, body, `<link rel="image_src" href="https://account.info/avatar/alice.example/profile.jpg">`)
 	require.Contains(t, body, "Alice Example")
 	require.Contains(t, body, "Builder of reliable systems.")
 	require.Contains(t, body, "did:plc:alice")
@@ -154,7 +159,7 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	require.Contains(t, body, "org.example.profile")
 	require.Contains(t, body, "bafydefault")
 	require.Contains(t, body, "bafyother")
-	require.Contains(t, body, `src="/avatar/alice.example"`)
+	require.Contains(t, body, `src="/avatar/alice.example/profile.jpg"`)
 	require.Contains(t, body, `href="https://bsky.app/profile/alice.example"`)
 	require.Contains(t, body, `src="/assets/apps/bluesky.svg"`)
 	require.Contains(t, body, `aria-label="Open @alice.example on Bluesky"`)
@@ -167,6 +172,8 @@ func TestAccountHandlerRendersHTMLForLinkPreviewCrawler(t *testing.T) {
 
 	lookup := &fakeAccountLookup{account: testAccount(1)}
 	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Avatar = "https://pds.example/xrpc/com.atproto.sync.getBlob"
+	lookup.account.AvatarContentType = "image/png"
 	response := requestAccountWithHeaders(
 		t,
 		lookup,
@@ -177,7 +184,11 @@ func TestAccountHandlerRendersHTMLForLinkPreviewCrawler(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Equal(t, "text/html; charset=utf-8", response.Header().Get("Content-Type"))
-	require.Contains(t, response.Body.String(), `<meta property="og:title"`)
+	body := response.Body.String()
+	require.Contains(t, body, `<meta property="og:title"`)
+	require.Contains(t, body, `<meta property="og:image" content="https://account.info/avatar/alice.example/profile.png">`)
+	require.Contains(t, body, `<meta property="og:image:type" content="image/png">`)
+	require.Contains(t, body, `<link rel="image_src" href="https://account.info/avatar/alice.example/profile.png">`)
 }
 
 func TestAccountHandlerRendersAllProfilesWithoutAuthority(t *testing.T) {
@@ -422,6 +433,28 @@ func TestAvatarHandlerServesCacheableImage(t *testing.T) {
 		response.Header().Get("Cache-Control"),
 	)
 	require.Empty(t, response.Header().Get("Vary"))
+}
+
+func TestAvatarHandlerServesExtensionBearingPreviewURL(t *testing.T) {
+	t.Parallel()
+
+	content := []byte("verified image bytes")
+	lookup := &fakeAccountLookup{avatar: profile.Avatar{
+		Content:     content,
+		ContentType: "image/jpeg",
+		CID:         "bafkreicid",
+	}}
+	response := requestAccountWithAccept(
+		t,
+		lookup,
+		"/avatar/alice.example/profile.jpg",
+		"image/*",
+	)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "alice.example", lookup.avatarID)
+	require.Equal(t, content, response.Body.Bytes())
+	require.Equal(t, "image/jpeg", response.Header().Get("Content-Type"))
 }
 
 func TestAvatarHandlerHonorsConditionalRequest(t *testing.T) {
