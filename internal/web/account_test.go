@@ -190,7 +190,7 @@ func TestAccountHandlerExplicitJSONPreservesPayloadForBrowser(t *testing.T) {
 	require.Equal(t, "application/json; charset=utf-8", response.Header().Get("Content-Type"))
 	var body decodedAccountResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
-	require.Len(t, body.Profiles, 1)
+	require.Len(t, body.Profiles, 2)
 	require.NotContains(t, response.Body.String(), "bsky.app")
 }
 
@@ -389,7 +389,7 @@ func TestAvatarHandlerErrors(t *testing.T) {
 	}
 }
 
-func TestAccountHandlerReturnsAuthoritativeProfile(t *testing.T) {
+func TestAccountHandlerReturnsAuthoritativeProfileAndAllRecords(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
@@ -412,30 +412,6 @@ func TestAccountHandlerReturnsAuthoritativeProfile(t *testing.T) {
 		"https://pds.example/xrpc/com.atproto.sync.getBlob",
 		body.Avatar,
 	)
-	require.Len(t, body.Profiles, 1)
-	require.Equal(
-		t,
-		lookup.account.Profiles[0].URI,
-		body.Profiles["app.bsky.actor.profile"].URI,
-	)
-	var raw struct {
-		Profiles map[string]map[string]json.RawMessage `json:"profiles"`
-	}
-	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &raw))
-	require.NotContains(t, raw.Profiles["app.bsky.actor.profile"], "collection")
-}
-
-func TestAccountHandlerReturnsAllProfiles(t *testing.T) {
-	t.Parallel()
-
-	lookup := &fakeAccountLookup{account: testAccount(2)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
-	response := requestAccount(t, lookup, "/alice.example?all=true")
-
-	require.Equal(t, http.StatusOK, response.Code)
-	var body decodedAccountResponse
-	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
-	require.Equal(t, "app.bsky.actor.profile", body.Authoritative)
 	require.Equal(
 		t,
 		map[string]decodedProfileResponse{
@@ -444,6 +420,44 @@ func TestAccountHandlerReturnsAllProfiles(t *testing.T) {
 		},
 		body.Profiles,
 	)
+	var raw struct {
+		Profiles map[string]map[string]json.RawMessage `json:"profiles"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &raw))
+	require.NotContains(t, raw.Profiles["app.bsky.actor.profile"], "collection")
+}
+
+func TestAccountHandlerReturnsAllProfilesWithoutAuthority(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(2)}
+	response := requestAccount(t, lookup, "/alice.example")
+
+	require.Equal(t, http.StatusOK, response.Code)
+	var body decodedAccountResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Empty(t, body.Authoritative)
+	require.Equal(
+		t,
+		map[string]decodedProfileResponse{
+			"app.bsky.actor.profile": decodedProfile(&lookup.account.Profiles[0]),
+			"org.example.profile":    decodedProfile(&lookup.account.Profiles[1]),
+		},
+		body.Profiles,
+	)
+}
+
+func TestAccountHandlerIgnoresRemovedAllParameter(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(2)}
+	lookup.account.Authoritative = "app.bsky.actor.profile"
+	response := requestAccount(t, lookup, "/alice.example?all=sometimes")
+
+	require.Equal(t, http.StatusOK, response.Code)
+	var body decodedAccountResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Len(t, body.Profiles, 2)
 }
 
 func TestAccountHandlerFiltersCollections(t *testing.T) {
@@ -474,7 +488,7 @@ func TestAccountHandlerRejectsDuplicateProfileCollections(t *testing.T) {
 	lookup := &fakeAccountLookup{account: testAccount(2)}
 	lookup.account.Authoritative = "app.bsky.actor.profile"
 	lookup.account.Profiles[1].Collection = "app.bsky.actor.profile"
-	response := requestAccount(t, lookup, "/alice.example?all=true")
+	response := requestAccount(t, lookup, "/alice.example")
 
 	require.Equal(t, http.StatusInternalServerError, response.Code)
 	var body errorResponse
@@ -493,25 +507,11 @@ func TestAccountHandlerErrors(t *testing.T) {
 		code   string
 	}{
 		{
-			name:   "invalid all",
-			target: "/alice.example?all=sometimes",
-			lookup: &fakeAccountLookup{},
-			status: http.StatusBadRequest,
-			code:   "invalid_query",
-		},
-		{
 			name:   "no profile",
 			target: "/alice.example",
 			lookup: &fakeAccountLookup{account: testAccount(0)},
 			status: http.StatusNotFound,
 			code:   "profile_not_found",
-		},
-		{
-			name:   "multiple profiles",
-			target: "/alice.example",
-			lookup: &fakeAccountLookup{account: testAccount(2)},
-			status: http.StatusConflict,
-			code:   "multiple_profiles",
 		},
 		{
 			name:   "invalid identifier",

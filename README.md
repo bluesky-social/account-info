@@ -11,7 +11,8 @@ every other supported profile record on a small landing page:
 https://account.info/calabro.io
 ```
 
-API clients continue to receive the account profile as JSON:
+API clients receive the default profile and every other supported profile
+record as JSON:
 
 ```console
 curl https://account.info/calabro.io

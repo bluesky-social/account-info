@@ -51,13 +51,13 @@
           </div>
           <div>
             <p>Download an avatar:</p>
-            <pre><code>curl -o avatar.jpg https://account.info/avatar/calabro.io</code></pre>
+            <pre><code>curl https://account.info/avatar/calabro.io</code></pre>
+          </div>
+          <div>
+            <p>Or via the Accept header:</p>
+            <pre><code>curl -L -H 'Accept: image/*' https://account.info/calabro.io</code></pre>
           </div>
         </div>
-        <p class="small">
-          Add <code>?all=true</code> to include every supported profile record
-          found for the account.
-        </p>
       </section>
     </main>
 

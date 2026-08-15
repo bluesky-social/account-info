@@ -75,12 +75,6 @@ func handleAccount(accounts accountLookup) http.HandlerFunc {
 			)
 			return
 		}
-		all, err := parseAll(request)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_query", err.Error(), nil)
-			return
-		}
-
 		// Bound the whole lookup (identity resolution + record fetches,
 		// including the XRPC client's internal retries) below the server's
 		// 30s WriteTimeout so a slow PDS can't stack retries past it.
@@ -112,35 +106,7 @@ func handleAccount(accounts accountLookup) http.HandlerFunc {
 			writeAccountHTML(w, &account)
 			return
 		}
-		if all || len(collections) > 0 {
-			writeAccountJSON(w, http.StatusOK, &account)
-			return
-		}
-		if account.Authoritative != "" {
-			for _, record := range account.Profiles {
-				if record.Collection == account.Authoritative {
-					account.Profiles = []profile.Record{record}
-					writeAccountJSON(w, http.StatusOK, &account)
-					return
-				}
-			}
-		}
-		if len(account.Profiles) == 1 {
-			writeAccountJSON(w, http.StatusOK, &account)
-			return
-		}
-
-		available := make([]string, 0, len(account.Profiles))
-		for _, record := range account.Profiles {
-			available = append(available, record.Collection)
-		}
-		writeError(
-			w,
-			http.StatusConflict,
-			"multiple_profiles",
-			"multiple profiles are available without an authoritative profile",
-			available,
-		)
+		writeAccountJSON(w, http.StatusOK, &account)
 	}
 }
 
@@ -177,18 +143,6 @@ func handleAvatar(accounts accountLookup) http.HandlerFunc {
 			bytes.NewReader(avatar.Content),
 		)
 	}
-}
-
-func parseAll(request *http.Request) (bool, error) {
-	raw := request.URL.Query().Get("all")
-	if raw == "" {
-		return false, nil
-	}
-	all, err := strconv.ParseBool(raw)
-	if err != nil {
-		return false, fmt.Errorf("all must be a boolean")
-	}
-	return all, nil
 }
 
 func writeLookupError(
