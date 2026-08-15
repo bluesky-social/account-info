@@ -139,6 +139,14 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 
 	body := response.Body.String()
 	require.Contains(t, body, "<title>Alice Example (@alice.example) — account.info</title>")
+	require.Contains(t, body, `<meta property="og:type" content="profile">`)
+	require.Contains(t, body, `<meta property="og:site_name" content="account.info">`)
+	require.Contains(t, body, `<meta property="og:title" content="Alice Example (@alice.example)">`)
+	require.Contains(t, body, `<meta property="og:description" content="Builder of reliable systems.">`)
+	require.Contains(t, body, `<meta property="og:url" content="https://account.info/alice.example">`)
+	require.Contains(t, body, `<meta property="og:image" content="https://account.info/avatar/alice.example">`)
+	require.Contains(t, body, `<meta property="og:image:alt" content="Alice Example avatar">`)
+	require.Contains(t, body, `<meta name="twitter:card" content="summary">`)
 	require.Contains(t, body, "Alice Example")
 	require.Contains(t, body, "Builder of reliable systems.")
 	require.Contains(t, body, "did:plc:alice")
@@ -152,6 +160,24 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	require.Contains(t, body, `aria-label="Open @alice.example on Bluesky"`)
 	require.Contains(t, body, `target="_blank"`)
 	require.NotContains(t, body, "secret=upstream")
+}
+
+func TestAccountHandlerRendersHTMLForLinkPreviewCrawler(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(1)}
+	lookup.account.Authoritative = "app.bsky.actor.profile"
+	response := requestAccountWithHeaders(
+		t,
+		lookup,
+		"/alice.example",
+		"*/*",
+		"Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+	)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "text/html; charset=utf-8", response.Header().Get("Content-Type"))
+	require.Contains(t, response.Body.String(), `<meta property="og:title"`)
 }
 
 func TestAccountHandlerRendersAllProfilesWithoutAuthority(t *testing.T) {

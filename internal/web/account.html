@@ -3,7 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="AT Protocol profile information for {{.Label}}.">
+  <meta name="description" content="{{.MetaDescription}}">
+  <meta property="og:type" content="profile">
+  <meta property="og:site_name" content="account.info">
+  <meta property="og:title" content="{{.Title}}">
+  <meta property="og:description" content="{{.MetaDescription}}">
+  <meta property="og:url" content="{{.CanonicalURL}}">
+  {{if .AvatarURL}}<meta property="og:image" content="{{.AvatarURL}}">
+  <meta property="og:image:alt" content="{{.AvatarAlt}}">{{end}}
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{.Title}}">
+  <meta name="twitter:description" content="{{.MetaDescription}}">
+  {{if .AvatarURL}}<meta name="twitter:image" content="{{.AvatarURL}}">
+  <meta name="twitter:image:alt" content="{{.AvatarAlt}}">{{end}}
+  <link rel="canonical" href="{{.CanonicalURL}}">
   <title>{{.Title}} — account.info</title>
   <style>{{.Styles}}</style>
 </head>

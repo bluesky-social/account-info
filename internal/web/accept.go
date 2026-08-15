@@ -26,8 +26,9 @@ const (
 // negotiateAccountRepresentation selects among the representations exposed by
 // the account endpoint. An explicit Accept preference is authoritative. When
 // the header is absent or leaves multiple representations equally preferred,
-// the user agent breaks the tie: browsers receive HTML and known API clients
-// (or clients without a user agent) retain the historical JSON behavior.
+// the user agent breaks the tie: browsers and link-preview crawlers receive
+// HTML, while known API clients (or clients without a user agent) retain the
+// historical JSON behavior.
 func negotiateAccountRepresentation(
 	values []string,
 	userAgent string,
@@ -133,11 +134,29 @@ func contextualAccountRepresentation(userAgent string) accountRepresentation {
 	if userAgent == "" || isProgrammaticUserAgent(userAgent) {
 		return representationJSON
 	}
-	if isBrowserUserAgent(userAgent) {
+	if isBrowserUserAgent(userAgent) || isLinkPreviewUserAgent(userAgent) {
 		return representationHTML
 	}
 	// Preserve the endpoint's historical API behavior for unrecognized agents.
 	return representationJSON
+}
+
+func isLinkPreviewUserAgent(userAgent string) bool {
+	lower := strings.ToLower(userAgent)
+	for _, marker := range []string{
+		"discordbot",
+		"facebookexternalhit",
+		"linkedinbot",
+		"slackbot",
+		"telegrambot",
+		"twitterbot",
+		"whatsapp",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func isProgrammaticUserAgent(userAgent string) bool {

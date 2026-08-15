@@ -20,14 +20,21 @@ curl https://account.info/calabro.io
 
 The account endpoint negotiates between HTML, JSON, and image responses using
 the `Accept` header. Explicit preferences take priority. If the header is
-missing or ambiguous, browser user agents receive HTML while common API clients
-such as curl, Go, Python, and Node receive JSON. Callers can always select a
-representation explicitly:
+missing or ambiguous, browsers and common link-preview crawlers receive HTML
+while API clients such as curl, Go, Python, and Node receive JSON. Callers can
+always select a representation explicitly:
 
 ```console
 curl -H 'Accept: application/json' https://account.info/calabro.io
 curl -H 'Accept: text/html' https://account.info/calabro.io
 ```
+
+## Link previews
+
+Account pages expose Open Graph and Twitter Card metadata. Services such as
+Slack can use the profile's display name, handle, description, and avatar when
+expanding an account URL. Preview image and canonical URLs use the fixed public
+`https://account.info` origin rather than the request's untrusted `Host` header.
 
 ## Avatars
 

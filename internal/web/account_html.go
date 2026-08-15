@@ -18,18 +18,24 @@ var accountHTML string
 
 var accountTemplate = template.Must(template.New("account.html").Parse(accountHTML))
 
+const publicOrigin = "https://account.info"
+
 type accountPage struct {
-	Styles      template.CSS
-	Title       string
-	Label       string
-	Heading     string
-	DID         string
-	Handle      string
-	PDS         string
-	Description string
-	AvatarPath  string
-	HasDefault  bool
-	Profiles    []accountPageProfile
+	Styles          template.CSS
+	Title           string
+	Label           string
+	Heading         string
+	DID             string
+	Handle          string
+	PDS             string
+	Description     string
+	MetaDescription string
+	CanonicalURL    string
+	AvatarPath      string
+	AvatarURL       string
+	AvatarAlt       string
+	HasDefault      bool
+	Profiles        []accountPageProfile
 }
 
 type accountPageProfile struct {
@@ -90,24 +96,33 @@ func newAccountPage(account *profile.Account) (accountPage, error) {
 	if account.DisplayName != "" && account.Handle != "" {
 		title += " (@" + account.Handle + ")"
 	}
+	metaDescription := account.Description
+	if metaDescription == "" {
+		metaDescription = "AT Protocol profile information for " + label + "."
+	}
+	escapedLabel := url.PathEscape(label)
 
 	defaultCollection := account.Authoritative
 	if defaultCollection == "" && len(account.Profiles) == 1 {
 		defaultCollection = account.Profiles[0].Collection
 	}
 	page := accountPage{
-		Styles:      template.CSS(stylesheet),
-		Title:       title,
-		Label:       label,
-		Heading:     heading,
-		DID:         account.DID,
-		Handle:      account.Handle,
-		PDS:         account.PDS,
-		Description: account.Description,
-		Profiles:    make([]accountPageProfile, 0, len(account.Profiles)),
+		Styles:          template.CSS(stylesheet),
+		Title:           title,
+		Label:           label,
+		Heading:         heading,
+		DID:             account.DID,
+		Handle:          account.Handle,
+		PDS:             account.PDS,
+		Description:     account.Description,
+		MetaDescription: metaDescription,
+		CanonicalURL:    publicOrigin + "/" + escapedLabel,
+		Profiles:        make([]accountPageProfile, 0, len(account.Profiles)),
 	}
 	if account.Avatar != "" {
-		page.AvatarPath = "/avatar/" + url.PathEscape(label)
+		page.AvatarPath = "/avatar/" + escapedLabel
+		page.AvatarURL = publicOrigin + page.AvatarPath
+		page.AvatarAlt = heading + " avatar"
 	}
 
 	seen := make(map[string]struct{}, len(account.Profiles))
