@@ -289,6 +289,11 @@ func NewDefaultService(cacheConfig CacheConfig) (*Service, error) {
 			Collection: bsky.NSIDActorProfile,
 			RecordKey:  profileRecordKey,
 			Extract:    extractBlueskyProfile,
+			App: &ProfileApp{
+				Name:       "Bluesky",
+				Icon:       "bluesky",
+				ProfileURL: blueskyProfileURL,
+			},
 		},
 	)
 	service.cache = newAccountCache(
@@ -297,4 +302,19 @@ func NewDefaultService(cacheConfig CacheConfig) (*Service, error) {
 		cacheConfig.MaxEntries,
 	)
 	return service, nil
+}
+
+func blueskyProfileURL(accountIdentity Identity) (string, error) {
+	identifier := accountIdentity.Handle
+	if identifier == "" {
+		identifier = accountIdentity.DID
+	}
+	if identifier == "" {
+		return "", fmt.Errorf("identity has no handle or DID")
+	}
+	return (&url.URL{
+		Scheme: "https",
+		Host:   "bsky.app",
+		Path:   "/profile/" + identifier,
+	}).String(), nil
 }

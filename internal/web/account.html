@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AT Protocol profile information for {{.Label}}.">
+  <title>{{.Title}} — account.info</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <style>{{.Styles}}</style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <a class="home" href="/">account.info</a>
+      <nav aria-label="Useful links">
+        <a href="https://atproto.com/" target="_blank" rel="noreferrer">AT Protocol</a>
+        <a href="https://github.com/bluesky-social/account-info" target="_blank" rel="noreferrer">Source code</a>
+      </nav>
+    </header>
+
+    <main>
+      <div class="profile-hero">
+        {{if .AvatarPath}}<img class="avatar" src="{{.AvatarPath}}" alt="{{.Label}} avatar" width="112" height="112">{{end}}
+        <div>
+          <h1>{{.Heading}}</h1>
+          {{if .Handle}}<p class="handle">@{{.Handle}}</p>{{end}}
+          {{if .Description}}<p class="description">{{.Description}}</p>{{end}}
+        </div>
+      </div>
+
+      <section aria-labelledby="identity-title">
+        <h2 id="identity-title">Account</h2>
+        <dl class="identity">
+          <dt>DID</dt>
+          <dd><code>{{.DID}}</code></dd>
+          {{if .Handle}}
+          <dt>Handle</dt>
+          <dd><code>{{.Handle}}</code></dd>
+          {{end}}
+          <dt>PDS</dt>
+          <dd><a href="{{.PDS}}" rel="noreferrer"><code>{{.PDS}}</code></a></dd>
+        </dl>
+      </section>
+
+      <section aria-labelledby="profiles-title">
+        <h2 id="profiles-title">Profile records</h2>
+        {{if not .HasDefault}}<p class="small">No authoritative profile is available; all discovered profile records are shown without selecting a default.</p>{{end}}
+        <div class="profile-list">
+          {{range .Profiles}}
+          <article class="profile-card">
+            <div class="profile-card-heading">
+              <div class="profile-card-title">
+                <h3><code>{{.Collection}}</code></h3>
+                {{if and .AppURL .AppIcon}}<a class="app-link" href="{{.AppURL}}" target="_blank" rel="noreferrer noopener" aria-label="{{.AppLabel}}" title="{{.AppLabel}}"><img src="{{.AppIcon}}" alt="" width="20" height="20"></a>{{end}}
+              </div>
+              {{if .Default}}<span class="badge">Default</span>{{end}}
+            </div>
+            <p class="record-meta">
+              <span>URI: <code>{{.URI}}</code></span>
+              {{if .CID}}<span>CID: <code>{{.CID}}</code></span>{{end}}
+            </p>
+            <pre><code>{{.Value}}</code></pre>
+          </article>
+          {{end}}
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        account.info is <a href="https://github.com/bluesky-social/account-info">open source</a> and built on the <a href="https://atproto.com/">AT Protocol</a>.
+      </p>
+    </footer>
+  </div>
+</body>
+</html>

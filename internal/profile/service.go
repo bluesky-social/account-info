@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
+	"strings"
 )
 
 var (
@@ -47,6 +49,22 @@ type Source struct {
 	Collection string
 	RecordKey  string
 	Extract    func(Identity, json.RawMessage) (Summary, error)
+	App        *ProfileApp
+}
+
+// ProfileApp describes how a profile record links to its application.
+type ProfileApp struct {
+	Name string
+	// Icon names the self-hosted assets/apps/<icon>.svg presentation asset.
+	Icon       string
+	ProfileURL func(Identity) (string, error)
+}
+
+// AppLink is a resolved application profile link for a record.
+type AppLink struct {
+	Name string
+	Icon string
+	URL  string
 }
 
 // Summary contains canonical fields extracted from the selected profile.
@@ -70,6 +88,7 @@ type Record struct {
 	URI        string          `json:"uri"`
 	CID        string          `json:"cid,omitempty"`
 	Value      json.RawMessage `json:"value"`
+	App        *AppLink        `json:"-"`
 }
 
 // Account contains a resolved identity and its available profile records.
@@ -213,6 +232,17 @@ func (s *Service) lookup(
 		if getErr != nil {
 			return Account{}, fmt.Errorf("get %s: %w", source.Collection, getErr)
 		}
+		if source.App != nil {
+			appLink, linkErr := resolveAppLink(identity, source.App)
+			if linkErr != nil {
+				return Account{}, fmt.Errorf(
+					"link %s: %w",
+					source.Collection,
+					linkErr,
+				)
+			}
+			record.App = &appLink
+		}
 		var summary Summary
 		if source.Extract != nil {
 			summary, getErr = source.Extract(identity, record.Value)
@@ -233,6 +263,39 @@ func (s *Service) lookup(
 		}
 	}
 	return account, nil
+}
+
+func resolveAppLink(identity Identity, app *ProfileApp) (AppLink, error) {
+	if app.Name == "" {
+		return AppLink{}, fmt.Errorf("app name is empty")
+	}
+	if !validAppIcon(app.Icon) {
+		return AppLink{}, fmt.Errorf("invalid app icon %q", app.Icon)
+	}
+	if app.ProfileURL == nil {
+		return AppLink{}, fmt.Errorf("app profile URL builder is nil")
+	}
+	rawURL, err := app.ProfileURL(identity)
+	if err != nil {
+		return AppLink{}, fmt.Errorf("build app profile URL: %w", err)
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return AppLink{}, fmt.Errorf("invalid app profile URL %q", rawURL)
+	}
+	return AppLink{Name: app.Name, Icon: app.Icon, URL: parsed.String()}, nil
+}
+
+func validAppIcon(icon string) bool {
+	if icon == "" {
+		return false
+	}
+	for _, character := range icon {
+		if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789-", character) {
+			return false
+		}
+	}
+	return true
 }
 
 func applySummary(account *Account, summary Summary) {

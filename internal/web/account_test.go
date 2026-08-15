@@ -86,21 +86,174 @@ func TestAccountHandlerRedirectsPreferredImageRepresentation(t *testing.T) {
 			t.Parallel()
 			lookup := &fakeAccountLookup{account: testAccount(1)}
 			lookup.account.Authoritative = "app.bsky.actor.profile"
-			response := requestAccountWithAccept(
+			response := requestAccountWithHeaders(
 				t,
 				lookup,
 				"/alice.example",
 				test.accept,
+				"curl/8.14.1",
 			)
 
 			require.Equal(t, test.status, response.Code)
-			require.Equal(t, "Accept", response.Header().Get("Vary"))
+			require.Equal(t, "Accept, User-Agent", response.Header().Get("Vary"))
 			if test.status == http.StatusTemporaryRedirect {
 				require.Equal(t, "/avatar/alice.example", response.Header().Get("Location"))
 				require.Equal(t, "public, max-age=300", response.Header().Get("Cache-Control"))
 			}
 		})
 	}
+}
+
+func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(2)}
+	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.DisplayName = "Alice Example"
+	lookup.account.Description = "Builder of reliable systems."
+	lookup.account.Avatar = "https://pds.example/xrpc/com.atproto.sync.getBlob?secret=upstream"
+	lookup.account.Profiles[0].CID = "bafydefault"
+	lookup.account.Profiles[0].App = &profile.AppLink{
+		Name: "Bluesky",
+		Icon: "bluesky",
+		URL:  "https://bsky.app/profile/alice.example",
+	}
+	lookup.account.Profiles[1].CID = "bafyother"
+	response := requestAccountWithHeaders(
+		t,
+		lookup,
+		"/alice.example",
+		"text/html,application/xhtml+xml,application/json;q=0.8",
+		"Mozilla/5.0 Firefox/141.0",
+	)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "text/html; charset=utf-8", response.Header().Get("Content-Type"))
+	require.Equal(t, "Accept, User-Agent", response.Header().Get("Vary"))
+	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
+	require.Contains(t, response.Header().Get("Content-Security-Policy"), "img-src 'self'")
+
+	body := response.Body.String()
+	require.Contains(t, body, "<title>Alice Example (@alice.example) — account.info</title>")
+	require.Contains(t, body, "Alice Example")
+	require.Contains(t, body, "Builder of reliable systems.")
+	require.Contains(t, body, "did:plc:alice")
+	require.Contains(t, body, "app.bsky.actor.profile")
+	require.Contains(t, body, "org.example.profile")
+	require.Contains(t, body, "bafydefault")
+	require.Contains(t, body, "bafyother")
+	require.Contains(t, body, `src="/avatar/alice.example"`)
+	require.Contains(t, body, `href="https://bsky.app/profile/alice.example"`)
+	require.Contains(t, body, `src="/assets/apps/bluesky.svg"`)
+	require.Contains(t, body, `aria-label="Open @alice.example on Bluesky"`)
+	require.Contains(t, body, `target="_blank"`)
+	require.NotContains(t, body, "secret=upstream")
+}
+
+func TestAccountHandlerRendersAllProfilesWithoutAuthority(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(2)}
+	response := requestAccountWithHeaders(
+		t,
+		lookup,
+		"/alice.example",
+		"text/html",
+		"curl/8.14.1",
+	)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Contains(t, response.Body.String(), "No authoritative profile is available")
+	require.Contains(t, response.Body.String(), "app.bsky.actor.profile")
+	require.Contains(t, response.Body.String(), "org.example.profile")
+}
+
+func TestAccountHandlerExplicitJSONPreservesPayloadForBrowser(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(2)}
+	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Profiles[0].App = &profile.AppLink{
+		Name: "Bluesky",
+		Icon: "bluesky",
+		URL:  "https://bsky.app/profile/alice.example",
+	}
+	response := requestAccountWithHeaders(
+		t,
+		lookup,
+		"/alice.example",
+		"application/json",
+		"Mozilla/5.0 Firefox/141.0",
+	)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "application/json; charset=utf-8", response.Header().Get("Content-Type"))
+	var body decodedAccountResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Len(t, body.Profiles, 1)
+	require.NotContains(t, response.Body.String(), "bsky.app")
+}
+
+func TestAccountHandlerRejectsUnacceptableRepresentationBeforeLookup(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(1)}
+	response := requestAccountWithHeaders(
+		t,
+		lookup,
+		"/alice.example",
+		"application/xml",
+		"Mozilla/5.0 Firefox/141.0",
+	)
+
+	require.Equal(t, http.StatusNotAcceptable, response.Code)
+	require.Empty(t, lookup.identifier)
+}
+
+func TestAccountLandingPageEscapesUpstreamContent(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(1)}
+	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.DisplayName = `<script>alert("display name")</script>`
+	lookup.account.Description = `<img src=x onerror=alert("description")>`
+	lookup.account.Profiles[0].Value = json.RawMessage(
+		`{"payload":"</script><script>alert('record')</script>"}`,
+	)
+	response := requestAccountWithHeaders(
+		t,
+		lookup,
+		"/alice.example",
+		"text/html",
+		"Mozilla/5.0 Firefox/141.0",
+	)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	body := response.Body.String()
+	require.NotContains(t, body, `<script>alert("display name")</script>`)
+	require.NotContains(t, body, `<img src=x onerror=alert("description")>`)
+	require.NotContains(t, body, `<script>alert('record')</script>`)
+	require.Contains(t, body, "&lt;script&gt;")
+}
+
+func TestAccountLandingPageRejectsDuplicateProfileCollections(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(2)}
+	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Profiles[1].Collection = "app.bsky.actor.profile"
+	response := requestAccountWithHeaders(
+		t,
+		lookup,
+		"/alice.example",
+		"text/html",
+		"Mozilla/5.0 Firefox/141.0",
+	)
+
+	require.Equal(t, http.StatusInternalServerError, response.Code)
+	var body errorResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Equal(t, "internal_error", body.Error)
 }
 
 func TestAvatarHandlerServesCacheableImage(t *testing.T) {
@@ -286,8 +439,8 @@ func TestAccountHandlerReturnsAllProfiles(t *testing.T) {
 	require.Equal(
 		t,
 		map[string]decodedProfileResponse{
-			"app.bsky.actor.profile": decodedProfile(lookup.account.Profiles[0]),
-			"org.example.profile":    decodedProfile(lookup.account.Profiles[1]),
+			"app.bsky.actor.profile": decodedProfile(&lookup.account.Profiles[0]),
+			"org.example.profile":    decodedProfile(&lookup.account.Profiles[1]),
 		},
 		body.Profiles,
 	)
@@ -434,7 +587,7 @@ func requestAccount(
 	lookup accountLookup,
 	target string,
 ) *httptest.ResponseRecorder {
-	return requestAccountWithAccept(t, lookup, target, "")
+	return requestAccountWithAccept(t, lookup, target, "application/json")
 }
 
 func requestAccountWithAccept(
@@ -442,6 +595,16 @@ func requestAccountWithAccept(
 	lookup accountLookup,
 	target string,
 	accept string,
+) *httptest.ResponseRecorder {
+	return requestAccountWithHeaders(t, lookup, target, accept, "")
+}
+
+func requestAccountWithHeaders(
+	t *testing.T,
+	lookup accountLookup,
+	target string,
+	accept string,
+	userAgent string,
 ) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequestWithContext(
@@ -452,6 +615,9 @@ func requestAccountWithAccept(
 	)
 	if accept != "" {
 		request.Header.Set("Accept", accept)
+	}
+	if userAgent != "" {
+		request.Header.Set("User-Agent", userAgent)
 	}
 	response := httptest.NewRecorder()
 	routes(lookup).ServeHTTP(response, request)
@@ -479,7 +645,7 @@ func testAccount(profileCount int) profile.Account {
 	return account
 }
 
-func decodedProfile(record profile.Record) decodedProfileResponse {
+func decodedProfile(record *profile.Record) decodedProfileResponse {
 	return decodedProfileResponse{
 		URI:   record.URI,
 		CID:   record.CID,

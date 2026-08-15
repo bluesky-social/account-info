@@ -50,8 +50,22 @@ type profileRecordResponse struct {
 
 func handleAccount(accounts accountLookup) http.HandlerFunc {
 	return func(w http.ResponseWriter, request *http.Request) {
-		w.Header().Add("Vary", "Accept")
-		if prefersImage(request.Header.Values("Accept")) {
+		w.Header().Set("Vary", "Accept, User-Agent")
+		representation := negotiateAccountRepresentation(
+			request.Header.Values("Accept"),
+			request.UserAgent(),
+		)
+		if representation == representationNotAcceptable {
+			writeError(
+				w,
+				http.StatusNotAcceptable,
+				"not_acceptable",
+				"available representations are text/html, application/json, and image/*",
+				nil,
+			)
+			return
+		}
+		if representation == representationImage {
 			w.Header().Set("Cache-Control", "public, max-age=300")
 			http.Redirect(
 				w,
@@ -92,6 +106,10 @@ func handleAccount(accounts accountLookup) http.HandlerFunc {
 				"no matching profile record was found",
 				nil,
 			)
+			return
+		}
+		if representation == representationHTML {
+			writeAccountHTML(w, &account)
 			return
 		}
 		if all || len(collections) > 0 {

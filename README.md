@@ -4,10 +4,28 @@ An HTTP profile service for [AT Protocol](https://atproto.com/) accounts.
 
 ## Account profiles
 
-Request an account by handle or DID to receive its profile as JSON:
+Open an account by handle or DID in a browser to see its default profile and
+every other supported profile record on a small landing page:
+
+```text
+https://account.info/calabro.io
+```
+
+API clients continue to receive the account profile as JSON:
 
 ```console
 curl https://account.info/calabro.io
+```
+
+The account endpoint negotiates between HTML, JSON, and image responses using
+the `Accept` header. Explicit preferences take priority. If the header is
+missing or ambiguous, browser user agents receive HTML while common API clients
+such as curl, Go, Python, and Node receive JSON. Callers can always select a
+representation explicitly:
+
+```console
+curl -H 'Accept: application/json' https://account.info/calabro.io
+curl -H 'Accept: text/html' https://account.info/calabro.io
 ```
 
 ## Avatars

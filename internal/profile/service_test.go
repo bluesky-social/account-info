@@ -85,6 +85,13 @@ func TestServiceLookup(t *testing.T) {
 		Source{
 			Collection: "org.example.profile",
 			RecordKey:  "self",
+			App: &ProfileApp{
+				Name: "Example App",
+				Icon: "example",
+				ProfileURL: func(identity Identity) (string, error) {
+					return "https://app.example/profile/" + identity.Handle, nil
+				},
+			},
 			Extract: func(Identity, json.RawMessage) (Summary, error) {
 				return Summary{DisplayName: "Alice"}, nil
 			},
@@ -104,6 +111,41 @@ func TestServiceLookup(t *testing.T) {
 	require.Equal(t, "Alice", account.DisplayName)
 	require.Len(t, account.Profiles, 1)
 	require.Equal(t, "org.example.profile", account.Profiles[0].Collection)
+	require.Equal(t, &AppLink{
+		Name: "Example App",
+		Icon: "example",
+		URL:  "https://app.example/profile/alice.example",
+	}, account.Profiles[0].App)
+}
+
+func TestServiceLookupRejectsInvalidAppLink(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(
+		&fakeResolver{identity: Identity{
+			DID:    "did:plc:alice",
+			Handle: "alice.example",
+			PDS:    "https://pds.example",
+		}},
+		&fakeReader{records: map[string]Record{
+			"app.example.profile": {Collection: "app.example.profile"},
+		}},
+		"app.example.profile",
+		Source{
+			Collection: "app.example.profile",
+			RecordKey:  "self",
+			App: &ProfileApp{
+				Name: "Unsafe App",
+				Icon: "unsafe",
+				ProfileURL: func(Identity) (string, error) {
+					return "javascript:alert(1)", nil
+				},
+			},
+		},
+	)
+
+	_, err := service.Lookup(context.Background(), "alice.example", nil)
+	require.ErrorContains(t, err, "invalid app profile URL")
 }
 
 func TestServiceLookupAllSkipsMissingRecords(t *testing.T) {

@@ -11,6 +11,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBlueskyProfileURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		identity Identity
+		want     string
+	}{
+		{
+			name: "handle",
+			identity: Identity{
+				DID:    "did:plc:alice",
+				Handle: "alice.example",
+			},
+			want: "https://bsky.app/profile/alice.example",
+		},
+		{
+			name:     "DID fallback",
+			identity: Identity{DID: "did:plc:alice"},
+			want:     "https://bsky.app/profile/did:plc:alice",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := blueskyProfileURL(test.identity)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
+}
+
 func TestRecordReaderNotFoundMapping(t *testing.T) {
 	t.Parallel()
 
