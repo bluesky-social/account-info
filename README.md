@@ -1,6 +1,6 @@
 # account-info
 
-An HTTP profile service for [AT Protocol](https://atproto.com/) accounts.
+[account.info](https://account.info) is a HTTPS profile service for [AT Protocol](https://atproto.com/) accounts.
 
 ## Account profiles
 
@@ -29,13 +29,6 @@ curl -H 'Accept: application/json' https://account.info/calabro.io
 curl -H 'Accept: text/html' https://account.info/calabro.io
 ```
 
-## Link previews
-
-Account pages expose Open Graph and Twitter Card metadata. Services such as
-Slack can use the profile's display name, handle, description, and avatar when
-expanding an account URL. Preview image and canonical URLs use the fixed public
-`https://account.info` origin rather than the request's untrusted `Host` header.
-
 ## Avatars
 
 The canonical avatar endpoint serves the profile's original JPEG or PNG:
@@ -56,44 +49,9 @@ Avatar responses include a strong ETag derived from the blob CID and are
 publicly cacheable for five minutes. Only the AT Protocol profile lexicon's
 JPEG and PNG types are served, with its 1 MB size limit enforced.
 
-## Account lookup cache
+## Link previews
 
-Successful account lookups are cached in memory for five minutes. Failed
-lookups are cached for 30 seconds, except for caller cancellation and timeout
-errors. The cache uses least-recently-used eviction and stores at most one
-million entries across successful and failed lookups.
-
-The defaults can be tuned with command-line flags or environment variables:
-
-| Flag | Environment variable | Default |
-| --- | --- | --- |
-| `--cache-ttl` | `ACCOUNT_INFO_CACHE_TTL` | `5m` |
-| `--cache-error-ttl` | `ACCOUNT_INFO_CACHE_ERROR_TTL` | `30s` |
-| `--cache-max-entries` | `ACCOUNT_INFO_CACHE_MAX_ENTRIES` | `1000000` |
-
-## Lookup rate limit
-
-Account and avatar requests are limited by source IP using a token-bucket-style
-limit. The default allows three requests per second with a burst of three;
-capacity then refills at one request every third of a second. Health checks,
-static assets, the home page, and lookup-form redirects do not consume the
-limit. Rejected requests return `429 Too Many Requests` with `Retry-After` and
-a JSON error response.
-
-The limit can be changed or disabled with a command-line flag or environment
-variable:
-
-| Flag | Environment variable | Default |
-| --- | --- | --- |
-| `--lookup-rate-limit` | `ACCOUNT_INFO_LOOKUP_RATE_LIMIT` | `3` |
-
-A value of `0` disables rate limiting. Negative values fail startup.
-
-The limiter uses the TCP peer address and intentionally ignores forwarding
-headers, which are spoofable without an explicit trusted-proxy policy. If the
-service runs behind a reverse proxy, enforce the equivalent limit there or
-ensure the application receives the original client as its peer. The limiter
-is local to each process, so multiple replicas do not share budgets. Its source
-table is bounded to prevent untrusted IP churn from causing unbounded memory
-growth; if every tracked source is still active at capacity, new sources are
-rejected until an entry has fully replenished.
+Account pages expose Open Graph and Twitter Card metadata. Services such as
+Slack can use the profile's display name, handle, description, and avatar when
+expanding an account URL. Preview image and canonical URLs use the fixed public
+`https://account.info` origin rather than the request's untrusted `Host` header.
