@@ -17,7 +17,7 @@ var indexHTML string
 //go:embed style.css
 var stylesheet string
 
-//go:embed assets/*.svg assets/apps/*.svg
+//go:embed assets/apps/*.svg
 var staticAssets embed.FS
 
 var indexTemplate = template.Must(template.New("index.html").Parse(indexHTML))
@@ -36,7 +36,6 @@ func routes(
 	mux.HandleFunc("GET /{$}", handleRoot)
 	mux.HandleFunc("GET /lookup", handleLookup)
 	mux.HandleFunc("GET /healthz", handleHealth)
-	mux.HandleFunc("GET /assets/favicon.svg", handleFavicon)
 	mux.HandleFunc("GET /assets/apps/{file}", handleAppIcon)
 	mux.Handle("GET /avatar/{identifier}", limitLookups(limiter, handleAvatar(accounts)))
 	mux.Handle("GET /{identifier}", limitLookups(limiter, handleAccount(accounts)))
@@ -50,10 +49,6 @@ func handleAppIcon(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeSVGAsset(w, request, "assets/apps/"+icon+".svg")
-}
-
-func handleFavicon(w http.ResponseWriter, request *http.Request) {
-	writeSVGAsset(w, request, "assets/favicon.svg")
 }
 
 func writeSVGAsset(w http.ResponseWriter, request *http.Request, path string) {
