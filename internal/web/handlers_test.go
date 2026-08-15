@@ -19,7 +19,6 @@ func TestBasicRoutes(t *testing.T) {
 		path string
 		body string
 	}{
-		{name: "root", path: "/", body: "account.info\n"},
 		{name: "health", path: "/healthz", body: "ok\n"},
 	}
 
@@ -46,6 +45,36 @@ func TestBasicRoutes(t *testing.T) {
 			)
 		})
 	}
+}
+
+func TestRootExplainsService(t *testing.T) {
+	t.Parallel()
+
+	request := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"/",
+		http.NoBody,
+	)
+	response := httptest.NewRecorder()
+
+	routes(&fakeAccountLookup{}).ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(
+		t,
+		"text/html; charset=utf-8",
+		response.Header().Get("Content-Type"),
+	)
+	require.Equal(t, "public, max-age=3600", response.Header().Get("Cache-Control"))
+	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
+
+	body := response.Body.String()
+	require.Contains(t, body, "<title>account.info — AT Protocol profile lookup</title>")
+	require.Contains(t, body, "https://account.info/calabro.io")
+	require.Contains(t, body, "https://account.info/avatar/calabro.io")
+	require.Contains(t, body, "https://github.com/bluesky-social/account-info")
+	require.Contains(t, body, "https://atproto.com/")
 }
 
 func TestUnmatchedPathReturnsNotFound(t *testing.T) {
