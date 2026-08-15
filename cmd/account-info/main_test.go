@@ -15,6 +15,7 @@ func TestCommandCacheDefaults(t *testing.T) { //nolint:paralleltest // Process e
 		"ACCOUNT_INFO_CACHE_ERROR_TTL",
 		"ACCOUNT_INFO_CACHE_MAX_ENTRIES",
 		"ACCOUNT_INFO_LOOKUP_RATE_LIMIT",
+		"ACCOUNT_INFO_TRUSTED_PROXY_CIDRS",
 	} {
 		unsetEnv(t, key)
 	}
@@ -23,6 +24,7 @@ func TestCommandCacheDefaults(t *testing.T) { //nolint:paralleltest // Process e
 	var gotErrorTTL time.Duration
 	var gotMaxEntries int
 	var gotRateLimit int
+	var gotTrustedProxyCIDRs []string
 	command := newCommand(func(
 		_ context.Context,
 		_ string,
@@ -30,11 +32,13 @@ func TestCommandCacheDefaults(t *testing.T) { //nolint:paralleltest // Process e
 		cacheErrorTTL time.Duration,
 		cacheMaxEntries int,
 		lookupRateLimit int,
+		trustedProxyCIDRs []string,
 	) error {
 		gotTTL = cacheTTL
 		gotErrorTTL = cacheErrorTTL
 		gotMaxEntries = cacheMaxEntries
 		gotRateLimit = lookupRateLimit
+		gotTrustedProxyCIDRs = trustedProxyCIDRs
 		return nil
 	})
 
@@ -44,6 +48,7 @@ func TestCommandCacheDefaults(t *testing.T) { //nolint:paralleltest // Process e
 	require.Equal(t, 30*time.Second, gotErrorTTL)
 	require.Equal(t, 1_000_000, gotMaxEntries)
 	require.Equal(t, 3, gotRateLimit)
+	require.Empty(t, gotTrustedProxyCIDRs)
 }
 
 func unsetEnv(t *testing.T, key string) {
@@ -65,11 +70,13 @@ func TestCommandCacheEnvironment(t *testing.T) {
 	t.Setenv("ACCOUNT_INFO_CACHE_ERROR_TTL", "15s")
 	t.Setenv("ACCOUNT_INFO_CACHE_MAX_ENTRIES", "12345")
 	t.Setenv("ACCOUNT_INFO_LOOKUP_RATE_LIMIT", "7")
+	t.Setenv("ACCOUNT_INFO_TRUSTED_PROXY_CIDRS", "10.0.1.0/24,10.0.2.0/24")
 
 	var gotTTL time.Duration
 	var gotErrorTTL time.Duration
 	var gotMaxEntries int
 	var gotRateLimit int
+	var gotTrustedProxyCIDRs []string
 	command := newCommand(func(
 		_ context.Context,
 		_ string,
@@ -77,11 +84,13 @@ func TestCommandCacheEnvironment(t *testing.T) {
 		cacheErrorTTL time.Duration,
 		cacheMaxEntries int,
 		lookupRateLimit int,
+		trustedProxyCIDRs []string,
 	) error {
 		gotTTL = cacheTTL
 		gotErrorTTL = cacheErrorTTL
 		gotMaxEntries = cacheMaxEntries
 		gotRateLimit = lookupRateLimit
+		gotTrustedProxyCIDRs = trustedProxyCIDRs
 		return nil
 	})
 
@@ -91,6 +100,7 @@ func TestCommandCacheEnvironment(t *testing.T) {
 	require.Equal(t, 15*time.Second, gotErrorTTL)
 	require.Equal(t, 12_345, gotMaxEntries)
 	require.Equal(t, 7, gotRateLimit)
+	require.Equal(t, []string{"10.0.1.0/24", "10.0.2.0/24"}, gotTrustedProxyCIDRs)
 }
 
 func TestCommandLookupRateLimitFlag(t *testing.T) {
@@ -104,6 +114,7 @@ func TestCommandLookupRateLimitFlag(t *testing.T) {
 		_ time.Duration,
 		_ int,
 		lookupRateLimit int,
+		_ []string,
 	) error {
 		gotRateLimit = lookupRateLimit
 		return nil
@@ -115,4 +126,34 @@ func TestCommandLookupRateLimitFlag(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Zero(t, gotRateLimit)
+}
+
+func TestCommandTrustedProxyCIDRFlags(t *testing.T) {
+	t.Parallel()
+
+	var gotTrustedProxyCIDRs []string
+	command := newCommand(func(
+		_ context.Context,
+		_ string,
+		_ time.Duration,
+		_ time.Duration,
+		_ int,
+		_ int,
+		trustedProxyCIDRs []string,
+	) error {
+		gotTrustedProxyCIDRs = trustedProxyCIDRs
+		return nil
+	})
+
+	err := command.Run(context.Background(), []string{
+		"account-info",
+		"--trusted-proxy-cidr", "10.0.1.0/24",
+		"--trusted-proxy-cidr", "2001:db8:1234::/48",
+	})
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		[]string{"10.0.1.0/24", "2001:db8:1234::/48"},
+		gotTrustedProxyCIDRs,
+	)
 }

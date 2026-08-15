@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +30,10 @@ type sourceIPLimiter struct {
 	burstTolerance time.Duration
 	maxEntries     int
 	now            func() time.Time
+
+	// trustedProxyPrefixes contains direct proxy peers that are trusted to
+	// append the client address to X-Forwarded-For, as AWS ALB does.
+	trustedProxyPrefixes []netip.Prefix
 }
 
 func newSourceIPLimiter(rate, maxEntries int) (*sourceIPLimiter, error) {
@@ -117,7 +122,7 @@ func limitLookups(limiter *sourceIPLimiter, next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		source, err := sourceIP(request.RemoteAddr)
+		source, err := requestSourceIP(request, limiter.trustedProxyPrefixes)
 		if err != nil {
 			slog.Error("determine lookup source IP", "error", err)
 			writeError(
@@ -145,6 +150,82 @@ func limitLookups(limiter *sourceIPLimiter, next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, request)
 	})
+}
+
+func parseTrustedProxyCIDRs(cidrs []string) ([]netip.Prefix, error) {
+	prefixes := make([]netip.Prefix, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		cidr = strings.TrimSpace(cidr)
+		prefix, err := netip.ParsePrefix(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("parse trusted proxy CIDR %q: %w", cidr, err)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
+}
+
+func requestSourceIP(
+	request *http.Request,
+	trustedProxyPrefixes []netip.Prefix,
+) (netip.Addr, error) {
+	peer, err := sourceIP(request.RemoteAddr)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+
+	trusted := false
+	for _, prefix := range trustedProxyPrefixes {
+		if prefix.Contains(peer) {
+			trusted = true
+			break
+		}
+	}
+	if !trusted {
+		return peer, nil
+	}
+
+	values := request.Header.Values("X-Forwarded-For")
+	if len(values) == 0 {
+		return netip.Addr{}, fmt.Errorf(
+			"trusted proxy %s did not provide X-Forwarded-For",
+			peer,
+		)
+	}
+	lastValue := values[len(values)-1]
+	if comma := strings.LastIndexByte(lastValue, ','); comma >= 0 {
+		lastValue = lastValue[comma+1:]
+	}
+	lastValue = strings.TrimSpace(lastValue)
+	if lastValue == "" {
+		return netip.Addr{}, fmt.Errorf(
+			"trusted proxy %s provided an empty X-Forwarded-For client address",
+			peer,
+		)
+	}
+
+	address, err := forwardedIP(lastValue)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf(
+			"parse X-Forwarded-For client address from trusted proxy %s: %w",
+			peer,
+			err,
+		)
+	}
+	return address, nil
+}
+
+func forwardedIP(value string) (netip.Addr, error) {
+	address, err := netip.ParseAddr(value)
+	if err == nil {
+		return address.Unmap(), nil
+	}
+
+	addressPort, addressPortErr := netip.ParseAddrPort(value)
+	if addressPortErr != nil {
+		return netip.Addr{}, fmt.Errorf("parse IP address %q: %w", value, addressPortErr)
+	}
+	return addressPort.Addr().Unmap(), nil
 }
 
 func sourceIP(remoteAddress string) (netip.Addr, error) {

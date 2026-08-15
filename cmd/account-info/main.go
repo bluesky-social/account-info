@@ -29,6 +29,7 @@ type serveFunc func(
 	time.Duration,
 	int,
 	int,
+	[]string,
 ) error
 
 func main() {
@@ -84,6 +85,13 @@ func newCommand(serve serveFunc) *cli.Command {
 				Usage:   "lookup requests allowed per second per source IP (0 disables)",
 				Sources: cli.EnvVars("ACCOUNT_INFO_LOOKUP_RATE_LIMIT"),
 			},
+			&cli.StringSliceFlag{
+				Name:  "trusted-proxy-cidr",
+				Usage: "CIDR of a direct proxy that appends the client IP to X-Forwarded-For (repeatable)",
+				Sources: cli.EnvVars(
+					"ACCOUNT_INFO_TRUSTED_PROXY_CIDRS",
+				),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return serve(
@@ -93,6 +101,7 @@ func newCommand(serve serveFunc) *cli.Command {
 				cmd.Duration("cache-error-ttl"),
 				cmd.Int("cache-max-entries"),
 				cmd.Int("lookup-rate-limit"),
+				cmd.StringSlice("trusted-proxy-cidr"),
 			)
 		},
 	}

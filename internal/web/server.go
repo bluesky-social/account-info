@@ -20,7 +20,13 @@ func Serve(
 	cacheErrorTTL time.Duration,
 	cacheMaxEntries int,
 	lookupRateLimit int,
+	trustedProxyCIDRs []string,
 ) error {
+	trustedProxyPrefixes, err := parseTrustedProxyCIDRs(trustedProxyCIDRs)
+	if err != nil {
+		return fmt.Errorf("configure trusted proxies: %w", err)
+	}
+
 	var limiter *sourceIPLimiter
 	if lookupRateLimit < 0 {
 		return fmt.Errorf("lookup rate limit must not be negative: %d", lookupRateLimit)
@@ -31,6 +37,7 @@ func Serve(
 		if err != nil {
 			return fmt.Errorf("configure lookup rate limiter: %w", err)
 		}
+		limiter.trustedProxyPrefixes = trustedProxyPrefixes
 	}
 
 	accounts, err := profile.NewDefaultService(profile.CacheConfig{
@@ -56,6 +63,7 @@ func Serve(
 			"HTTP server listening",
 			"address", address,
 			"lookup_rate_limit", lookupRateLimit,
+			"trusted_proxy_cidrs", len(trustedProxyPrefixes),
 		)
 		errCh <- server.ListenAndServe()
 	}()
