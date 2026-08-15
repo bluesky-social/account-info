@@ -168,6 +168,112 @@ func TestAccountHandlerRendersAllProfilesWithoutAuthority(t *testing.T) {
 	require.Contains(t, response.Body.String(), "org.example.profile")
 }
 
+func TestAccountHandlerRendersLookupErrorsOnLookupPageForBrowser(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		identifier string
+		err        error
+		status     int
+		message    string
+		technical  string
+	}{
+		{
+			name:       "identity not found",
+			identifier: "missing.example",
+			err:        fmt.Errorf("resolve identity: %w", profile.ErrIdentityNotFound),
+			status:     http.StatusNotFound,
+			message:    "That account could not be found.",
+		},
+		{
+			name:       "invalid identifier",
+			identifier: "asdf",
+			err: fmt.Errorf(
+				`%w: invalid Handle "asdf": must have at least two labels`,
+				profile.ErrInvalidIdentifier,
+			),
+			status:    http.StatusBadRequest,
+			message:   "Enter a valid handle or DID.",
+			technical: "must have at least two labels",
+		},
+		{
+			name:       "identity has no PDS",
+			identifier: "alice.example",
+			err:        fmt.Errorf("resolve identity: %w", profile.ErrNoPDS),
+			status:     http.StatusBadGateway,
+			message:    "That account does not specify a data server.",
+		},
+		{
+			name:       "lookup timeout",
+			identifier: "slow.example",
+			err:        fmt.Errorf("resolve identity: %w", context.DeadlineExceeded),
+			status:     http.StatusGatewayTimeout,
+			message:    "The lookup timed out. Please try again.",
+		},
+		{
+			name:       "upstream failure",
+			identifier: "joe.com",
+			err:        errors.New("dial joe.com: connection reset by peer"),
+			status:     http.StatusBadGateway,
+			message:    "We could not retrieve that account right now. Please try again.",
+			technical:  "connection reset by peer",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := requestAccountWithHeaders(
+				t,
+				&fakeAccountLookup{err: test.err},
+				"/"+test.identifier,
+				"text/html,application/xhtml+xml,application/json;q=0.8",
+				"Mozilla/5.0 Firefox/141.0",
+			)
+
+			require.Equal(t, test.status, response.Code)
+			require.Equal(t, "text/html; charset=utf-8", response.Header().Get("Content-Type"))
+			require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+			require.Equal(t, "Accept, User-Agent", response.Header().Get("Vary"))
+
+			body := response.Body.String()
+			require.Contains(t, body, "<title>account.info — AT Protocol profile lookup</title>")
+			require.Contains(t, body, `value="`+test.identifier+`"`)
+			require.Contains(t, body, `aria-invalid="true" aria-describedby="lookup-error"`)
+			require.Contains(t, body, `<p id="lookup-error" class="lookup-error" role="alert">`)
+			require.Contains(t, body, test.message)
+			if test.technical != "" {
+				require.NotContains(t, body, test.technical)
+			}
+			require.NotContains(t, body, `"error":`)
+		})
+	}
+}
+
+func TestAccountHandlerRendersMissingProfileOnLookupPageForBrowser(t *testing.T) {
+	t.Parallel()
+
+	response := requestAccountWithHeaders(
+		t,
+		&fakeAccountLookup{account: testAccount(0)},
+		"/alice.example",
+		"text/html",
+		"Mozilla/5.0 Firefox/141.0",
+	)
+
+	require.Equal(t, http.StatusNotFound, response.Code)
+	require.Equal(t, "text/html; charset=utf-8", response.Header().Get("Content-Type"))
+	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+	require.Contains(t, response.Body.String(), `value="alice.example"`)
+	require.Contains(
+		t,
+		response.Body.String(),
+		"No supported profile could be found for that account.",
+	)
+}
+
 func TestAccountHandlerExplicitJSONPreservesPayloadForBrowser(t *testing.T) {
 	t.Parallel()
 

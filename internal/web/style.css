@@ -61,6 +61,62 @@ h1 {
   font-size: 19px;
 }
 
+.lookup { margin-top: 28px; }
+
+.lookup label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.lookup-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.lookup input {
+  min-width: 0;
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  color: #262626;
+  background: #fff;
+  font: inherit;
+  line-height: 1.4;
+}
+
+.lookup input::placeholder { color: #777; }
+
+.lookup input[aria-invalid="true"] { border-color: #a12622; }
+
+.lookup button {
+  padding: 10px 18px;
+  border: 1px solid #075bb5;
+  border-radius: 4px;
+  color: #fff;
+  background: #075bb5;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.lookup button:hover { background: #064b94; }
+
+.lookup-error {
+  margin: 8px 0 0;
+  color: #a12622;
+  font-size: 15px;
+}
+
+.lookup input:focus-visible,
+.lookup button:focus-visible {
+  outline: 3px solid #9bc7f5;
+  outline-offset: 2px;
+}
+
 section {
   margin-top: 46px;
   padding-top: 40px;

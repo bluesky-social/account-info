@@ -88,11 +88,28 @@ func handleAccount(accounts accountLookup) http.HandlerFunc {
 			collections,
 		)
 		if err != nil {
+			if representation == representationHTML {
+				failure := classifyLookupFailure(err, accounts.Collections())
+				logLookupFailure(failure, err)
+				writeIndexHTML(w, failure.status, indexPage{
+					Identifier:  request.PathValue("identifier"),
+					LookupError: failure.htmlMessage,
+				})
+				return
+			}
 			writeLookupError(w, err, accounts.Collections())
 			return
 		}
 
 		if len(account.Profiles) == 0 {
+			if representation == representationHTML {
+				writeIndexHTML(w, http.StatusNotFound, indexPage{
+					Identifier: request.PathValue("identifier"),
+					LookupError: "No supported profile could be found for " +
+						"that account.",
+				})
+				return
+			}
 			writeError(
 				w,
 				http.StatusNotFound,
@@ -108,6 +125,16 @@ func handleAccount(accounts accountLookup) http.HandlerFunc {
 		}
 		writeAccountJSON(w, http.StatusOK, &account)
 	}
+}
+
+type lookupFailure struct {
+	status      int
+	code        string
+	message     string
+	htmlMessage string
+	collections []string
+	logLevel    slog.Level
+	logMessage  string
 }
 
 func handleAvatar(accounts accountLookup) http.HandlerFunc {
@@ -150,52 +177,102 @@ func writeLookupError(
 	err error,
 	collections []string,
 ) {
+	failure := classifyLookupFailure(err, collections)
+	logLookupFailure(failure, err)
+	writeError(
+		w,
+		failure.status,
+		failure.code,
+		failure.message,
+		failure.collections,
+	)
+}
+
+func classifyLookupFailure(err error, collections []string) lookupFailure {
 	switch {
 	case errors.Is(err, profile.ErrInvalidIdentifier):
-		writeError(
-			w,
-			http.StatusBadRequest,
-			"invalid_identifier",
-			err.Error(),
-			nil,
-		)
+		return lookupFailure{
+			status:      http.StatusBadRequest,
+			code:        "invalid_identifier",
+			message:     err.Error(),
+			htmlMessage: "Enter a valid handle or DID.",
+		}
 	case errors.Is(err, profile.ErrIdentityNotFound):
-		writeError(w, http.StatusNotFound, "account_not_found", err.Error(), nil)
+		return lookupFailure{
+			status:      http.StatusNotFound,
+			code:        "account_not_found",
+			message:     err.Error(),
+			htmlMessage: "That account could not be found.",
+		}
 	case errors.Is(err, profile.ErrNoPDS):
-		writeError(w, http.StatusBadGateway, "pds_not_found", err.Error(), nil)
+		return lookupFailure{
+			status:      http.StatusBadGateway,
+			code:        "pds_not_found",
+			message:     err.Error(),
+			htmlMessage: "That account does not specify a data server.",
+		}
 	case errors.Is(err, profile.ErrUnsupportedCollection):
-		writeError(
-			w,
-			http.StatusBadRequest,
-			"unsupported_collection",
-			err.Error(),
-			collections,
-		)
+		return lookupFailure{
+			status:      http.StatusBadRequest,
+			code:        "unsupported_collection",
+			message:     err.Error(),
+			htmlMessage: "That profile type is not supported.",
+			collections: collections,
+		}
 	case errors.Is(err, profile.ErrProfileNotFound):
-		writeError(w, http.StatusNotFound, "profile_not_found", err.Error(), nil)
+		return lookupFailure{
+			status:      http.StatusNotFound,
+			code:        "profile_not_found",
+			message:     err.Error(),
+			htmlMessage: "No supported profile could be found for that account.",
+		}
 	case errors.Is(err, profile.ErrAvatarNotFound):
-		writeError(w, http.StatusNotFound, "avatar_not_found", err.Error(), nil)
+		return lookupFailure{
+			status:      http.StatusNotFound,
+			code:        "avatar_not_found",
+			message:     err.Error(),
+			htmlMessage: "That account does not have an avatar.",
+		}
 	case errors.Is(err, profile.ErrMultipleProfiles):
-		writeError(w, http.StatusConflict, "multiple_profiles", err.Error(), nil)
+		return lookupFailure{
+			status:      http.StatusConflict,
+			code:        "multiple_profiles",
+			message:     err.Error(),
+			htmlMessage: "A default profile could not be selected for that account.",
+		}
 	case errors.Is(err, context.DeadlineExceeded):
-		slog.Warn("profile lookup timed out", "error", err)
-		writeError(
-			w,
-			http.StatusGatewayTimeout,
-			"upstream_timeout",
-			"profile lookup timed out",
-			nil,
-		)
+		return lookupFailure{
+			status:      http.StatusGatewayTimeout,
+			code:        "upstream_timeout",
+			message:     "profile lookup timed out",
+			htmlMessage: "The lookup timed out. Please try again.",
+			logLevel:    slog.LevelWarn,
+			logMessage:  "profile lookup timed out",
+		}
 	default:
-		slog.Error("profile lookup failed", "error", err)
-		writeError(
-			w,
-			http.StatusBadGateway,
-			"upstream_error",
-			"failed to retrieve profile information",
-			nil,
-		)
+		return lookupFailure{
+			status:  http.StatusBadGateway,
+			code:    "upstream_error",
+			message: "failed to retrieve profile information",
+			htmlMessage: "We could not retrieve that account right now. " +
+				"Please try again.",
+			logLevel:   slog.LevelError,
+			logMessage: "profile lookup failed",
+		}
 	}
+}
+
+func logLookupFailure(failure lookupFailure, err error) {
+	if failure.logMessage == "" {
+		return
+	}
+	slog.Log(
+		context.Background(),
+		failure.logLevel,
+		failure.logMessage,
+		"error",
+		err,
+	)
 }
 
 func writeError(

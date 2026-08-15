@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -22,12 +23,15 @@ var staticAssets embed.FS
 var indexTemplate = template.Must(template.New("index.html").Parse(indexHTML))
 
 type indexPage struct {
-	Styles template.CSS
+	Styles      template.CSS
+	Identifier  string
+	LookupError string
 }
 
 func routes(accounts accountLookup) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", handleRoot)
+	mux.HandleFunc("GET /lookup", handleLookup)
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /assets/favicon.svg", handleFavicon)
 	mux.HandleFunc("GET /assets/apps/{file}", handleAppIcon)
@@ -74,17 +78,43 @@ func validAssetName(name string) bool {
 }
 
 func handleRoot(w http.ResponseWriter, _ *http.Request) {
+	writeIndexHTML(w, http.StatusOK, indexPage{})
+}
+
+func writeIndexHTML(w http.ResponseWriter, status int, page indexPage) {
 	var body bytes.Buffer
-	if err := indexTemplate.Execute(&body, indexPage{Styles: template.CSS(stylesheet)}); err != nil {
+	page.Styles = template.CSS(stylesheet)
+	if err := indexTemplate.Execute(&body, page); err != nil {
 		slog.Error("render index page", "error", err)
 		http.Error(w, "failed to render page", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	if status == http.StatusOK {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	setHTMLHeaders(w)
+	w.WriteHeader(status)
 	if _, err := body.WriteTo(w); err != nil {
 		slog.Error("write index page", "error", err)
 	}
+}
+
+func handleLookup(w http.ResponseWriter, request *http.Request) {
+	identifier := request.URL.Query().Get("identifier")
+	if identifier == "" {
+		http.Error(w, "identifier is required", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(
+		w,
+		request,
+		"/"+url.PathEscape(identifier),
+		http.StatusSeeOther,
+	)
 }
 
 func setHTMLHeaders(w http.ResponseWriter) {
@@ -94,7 +124,7 @@ func setHTMLHeaders(w http.ResponseWriter) {
 	w.Header().Set(
 		"Content-Security-Policy",
 		"default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; "+
-			"form-action 'none'; frame-ancestors 'none'",
+			"form-action 'self'; frame-ancestors 'none'",
 	)
 }
 

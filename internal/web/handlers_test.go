@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -68,6 +69,11 @@ func TestRootExplainsService(t *testing.T) {
 	)
 	require.Equal(t, "public, max-age=3600", response.Header().Get("Cache-Control"))
 	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
+	require.Contains(
+		t,
+		response.Header().Get("Content-Security-Policy"),
+		"form-action 'self'",
+	)
 
 	body := response.Body.String()
 	require.Contains(t, body, "<style>")
@@ -77,6 +83,68 @@ func TestRootExplainsService(t *testing.T) {
 	require.Contains(t, body, "https://account.info/avatar/calabro.io")
 	require.Contains(t, body, "https://github.com/bluesky-social/account-info")
 	require.Contains(t, body, "https://atproto.com/")
+	require.Contains(t, body, `<form class="lookup" action="/lookup" method="get">`)
+	require.Contains(t, body, `name="identifier"`)
+	require.Contains(t, body, `placeholder="alice.example or did:plc:..."`)
+	require.Contains(t, body, `autocomplete="off"`)
+	require.Contains(t, body, `data-1p-ignore`)
+	require.Contains(t, body, `>Look up</button>`)
+}
+
+func TestLookupRedirectsToExactIdentifier(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		identifier string
+		location   string
+	}{
+		{name: "handle", identifier: "alice.example", location: "/alice.example"},
+		{name: "DID", identifier: "did:plc:alice", location: "/did:plc:alice"},
+		{
+			name:       "reserved characters remain in one path segment",
+			identifier: "//example.com",
+			location:   "/%2F%2Fexample.com",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			lookup := &fakeAccountLookup{}
+			request := httptest.NewRequestWithContext(
+				context.Background(),
+				http.MethodGet,
+				"/lookup?"+url.Values{"identifier": {test.identifier}}.Encode(),
+				http.NoBody,
+			)
+			response := httptest.NewRecorder()
+
+			routes(lookup).ServeHTTP(response, request)
+
+			require.Equal(t, http.StatusSeeOther, response.Code)
+			require.Equal(t, test.location, response.Header().Get("Location"))
+			require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+			require.Empty(t, lookup.identifier)
+		})
+	}
+}
+
+func TestLookupRejectsEmptyIdentifier(t *testing.T) {
+	t.Parallel()
+
+	request := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"/lookup?identifier=",
+		http.NoBody,
+	)
+	response := httptest.NewRecorder()
+
+	routes(&fakeAccountLookup{}).ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusBadRequest, response.Code)
 }
 
 func TestUnmatchedPathReturnsNotFound(t *testing.T) {

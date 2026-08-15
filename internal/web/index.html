@@ -24,6 +24,15 @@
         A service for fetching AT Protocol account information by handle or DID.
       </p>
 
+      <form class="lookup" action="/lookup" method="get">
+        <label for="lookup-identifier">Look up an account</label>
+        <div class="lookup-controls">
+          <input id="lookup-identifier" name="identifier" type="text" value="{{.Identifier}}" placeholder="alice.example or did:plc:..." required autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore{{if .LookupError}} aria-invalid="true" aria-describedby="lookup-error"{{end}}>
+          <button type="submit">Look up</button>
+        </div>
+        {{if .LookupError}}<p id="lookup-error" class="lookup-error" role="alert">{{.LookupError}}</p>{{end}}
+      </form>
+
       <section aria-labelledby="endpoints-title">
         <h2 id="endpoints-title">Endpoints</h2>
         <ul class="endpoints">
