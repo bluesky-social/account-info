@@ -204,6 +204,37 @@ code {
   font-size: 16px;
 }
 
+.app-links {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #d8e8fa;
+  border-radius: 8px;
+  background: #f4f9ff;
+}
+
+.app-link:hover {
+  border-color: #94bce8;
+  background: #eaf4ff;
+}
+
+.app-link img {
+  display: block;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
 .description {
   margin: 18px 0 0;
   white-space: pre-wrap;

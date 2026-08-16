@@ -32,6 +32,13 @@ type accountPage struct {
 	AvatarURL         string
 	AvatarAlt         string
 	AvatarContentType string
+	Apps              []accountPageApp
+}
+
+type accountPageApp struct {
+	URL     string
+	IconURL string
+	Label   string
 }
 
 func writeAccountHTML(w http.ResponseWriter, account *profile.Account) {
@@ -95,6 +102,7 @@ func newAccountPage(account *profile.Account) (accountPage, error) {
 		Description:     account.Description,
 		MetaDescription: metaDescription,
 		CanonicalURL:    publicOrigin + "/" + escapedLabel,
+		Apps:            make([]accountPageApp, 0, len(account.Profiles)),
 	}
 	if account.Avatar != "" {
 		filename, err := avatarFilename(account.AvatarContentType)
@@ -105,6 +113,20 @@ func newAccountPage(account *profile.Account) (accountPage, error) {
 		page.AvatarURL = publicOrigin + page.AvatarPath
 		page.AvatarAlt = heading + " avatar"
 		page.AvatarContentType = account.AvatarContentType
+	}
+	for _, record := range account.Profiles {
+		if record.App == nil {
+			continue
+		}
+		page.Apps = append(page.Apps, accountPageApp{
+			URL:     record.App.URL,
+			IconURL: record.App.IconURL,
+			Label: appLinkLabel(
+				account.Handle,
+				account.DID,
+				record.App.Name,
+			),
+		})
 	}
 	return page, nil
 }
@@ -120,4 +142,12 @@ func avatarFilename(contentType string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported avatar content type %q", contentType)
 	}
+}
+
+func appLinkLabel(handle, did, app string) string {
+	identifier := did
+	if handle != "" {
+		identifier = "@" + handle
+	}
+	return "Open " + identifier + " on " + app
 }

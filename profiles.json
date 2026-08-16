@@ -9,6 +9,11 @@
         "description": "$.description",
         "avatar": "$.avatar",
         "createdAt": "$.createdAt"
+      },
+      "app": {
+        "name": "Bluesky",
+        "iconURL": "https://web-cdn.bsky.app/static/apple-touch-icon.png",
+        "profileURL": "https://bsky.app/profile/{identifier}"
       }
     },
     {
@@ -19,6 +24,11 @@
         "description": "$.description",
         "avatar": "$.avatar",
         "createdAt": "$.createdAt"
+      },
+      "app": {
+        "name": "Tangled",
+        "iconURL": "https://tangled.org/static/logos/dolly.svg",
+        "profileURL": "https://tangled.org/{identifier}"
       }
     }
   ]

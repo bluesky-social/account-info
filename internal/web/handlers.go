@@ -84,7 +84,7 @@ func setHTMLHeaders(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set(
 		"Content-Security-Policy",
-		"default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; "+
+		"default-src 'none'; style-src 'unsafe-inline'; img-src 'self' https:; base-uri 'none'; "+
 			"form-action 'self'; frame-ancestors 'none'",
 	)
 }

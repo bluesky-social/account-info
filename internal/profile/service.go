@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"path"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jcalabro/atmos"
@@ -50,6 +53,7 @@ type Source struct {
 	RecordKey         string
 	Selectors         ProfileSelectors
 	Extract           func(Identity, json.RawMessage) (Summary, error)
+	App               *ProfileApp
 	compiledSelectors *compiledProfileSelectors
 }
 
@@ -82,6 +86,20 @@ func (s *Source) validate() error {
 	return nil
 }
 
+// ProfileApp describes how a profile record links to its application.
+type ProfileApp struct {
+	Name       string
+	IconURL    string
+	ProfileURL func(Identity) (string, error)
+}
+
+// AppLink is a resolved application profile link for a record.
+type AppLink struct {
+	Name    string
+	IconURL string
+	URL     string
+}
+
 // Summary contains canonical fields extracted from the selected profile.
 type Summary struct {
 	DisplayName string   `json:"displayName,omitempty"`
@@ -104,6 +122,7 @@ type Record struct {
 	URI        string          `json:"uri"`
 	CID        string          `json:"cid,omitempty"`
 	Value      json.RawMessage `json:"value"`
+	App        *AppLink        `json:"-"`
 }
 
 // Account contains a resolved identity and its available profile records.
@@ -249,6 +268,17 @@ func (s *Service) lookup(
 		if getErr != nil {
 			return Account{}, fmt.Errorf("get %s: %w", source.Collection, getErr)
 		}
+		if source.App != nil {
+			appLink, linkErr := resolveAppLink(identity, source.App)
+			if linkErr != nil {
+				return Account{}, fmt.Errorf(
+					"link %s: %w",
+					source.Collection,
+					linkErr,
+				)
+			}
+			record.App = &appLink
+		}
 		var summary Summary
 		if source.Extract != nil {
 			summary, getErr = source.Extract(identity, record.Value)
@@ -339,6 +369,47 @@ func parseProfileCreatedAt(collection, raw string) (time.Time, error) {
 		)
 	}
 	return createdAt, nil
+}
+
+func resolveAppLink(identity Identity, app *ProfileApp) (AppLink, error) {
+	if app.Name == "" {
+		return AppLink{}, fmt.Errorf("app name is empty")
+	}
+	iconURL, err := parseRemoteIconURL(app.IconURL)
+	if err != nil {
+		return AppLink{}, fmt.Errorf("invalid app icon URL %q: %w", app.IconURL, err)
+	}
+	if app.ProfileURL == nil {
+		return AppLink{}, fmt.Errorf("app profile URL builder is nil")
+	}
+	rawURL, err := app.ProfileURL(identity)
+	if err != nil {
+		return AppLink{}, fmt.Errorf("build app profile URL: %w", err)
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" ||
+		parsed.User != nil {
+		return AppLink{}, fmt.Errorf("invalid app profile URL %q", rawURL)
+	}
+	return AppLink{
+		Name:    app.Name,
+		IconURL: iconURL.String(),
+		URL:     parsed.String(),
+	}, nil
+}
+
+func parseRemoteIconURL(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" ||
+		parsed.User != nil || parsed.Fragment != "" {
+		return nil, fmt.Errorf("must be an HTTPS SVG, PNG, or JPEG URL")
+	}
+	switch strings.ToLower(path.Ext(parsed.Path)) {
+	case ".svg", ".png", ".jpg", ".jpeg":
+		return parsed, nil
+	default:
+		return nil, fmt.Errorf("must be an HTTPS SVG, PNG, or JPEG URL")
+	}
 }
 
 func applySummary(account *Account, summary Summary) {

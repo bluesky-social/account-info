@@ -123,6 +123,13 @@ func TestServiceLookup(t *testing.T) {
 		Source{
 			Collection: "org.example.profile",
 			RecordKey:  "self",
+			App: &ProfileApp{
+				Name:    "Example App",
+				IconURL: "https://app.example/icon.jpg",
+				ProfileURL: func(identity Identity) (string, error) {
+					return "https://app.example/profile/" + identity.Handle, nil
+				},
+			},
 			Selectors: ProfileSelectors{
 				DisplayName: "$.profile.name",
 				Description: "$.profile.bio",
@@ -151,6 +158,11 @@ func TestServiceLookup(t *testing.T) {
 		string(reader.records["org.example.profile"].Value),
 		string(account.Profiles[0].Value),
 	)
+	require.Equal(t, &AppLink{
+		Name:    "Example App",
+		IconURL: "https://app.example/icon.jpg",
+		URL:     "https://app.example/profile/alice.example",
+	}, account.Profiles[0].App)
 }
 
 func TestServiceLookupSelectsOldestProfileAsDefault(t *testing.T) {

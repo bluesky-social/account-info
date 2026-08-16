@@ -171,6 +171,10 @@ func cloneAccount(account *Account) Account {
 	for i, record := range account.Profiles {
 		clone.Profiles[i] = record
 		clone.Profiles[i].Value = append([]byte(nil), record.Value...)
+		if record.App != nil {
+			appLink := *record.App
+			clone.Profiles[i].App = &appLink
+		}
 	}
 	if account.avatarRef != nil {
 		avatarRef := *account.avatarRef

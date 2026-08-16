@@ -35,6 +35,9 @@
         <div>
           <h1>{{.Heading}}</h1>
           {{if .Handle}}<p class="handle">@{{.Handle}}</p>{{end}}
+          {{if .Apps}}<ul class="app-links" aria-label="Profiles on other services">
+            {{range .Apps}}<li><a class="app-link" href="{{.URL}}" target="_blank" rel="noreferrer noopener" aria-label="{{.Label}}" title="{{.Label}}"><img src="{{.IconURL}}" alt="" width="20" height="20" referrerpolicy="no-referrer"></a></li>{{end}}
+          </ul>{{end}}
           {{if .Description}}<p class="description">{{.Description}}</p>{{end}}
         </div>
       </div>

@@ -22,6 +22,16 @@ func TestEmbeddedProfileSources(t *testing.T) {
 		Avatar:      "$.avatar",
 		CreatedAt:   "$.createdAt",
 	}, source.Selectors)
+	require.NotNil(t, source.App)
+	require.Equal(t, "Bluesky", source.App.Name)
+	require.Equal(
+		t,
+		"https://web-cdn.bsky.app/static/apple-touch-icon.png",
+		source.App.IconURL,
+	)
+	profileURL, err := source.App.ProfileURL(Identity{Handle: "alice.example"})
+	require.NoError(t, err)
+	require.Equal(t, "https://bsky.app/profile/alice.example", profileURL)
 
 	tangled := requireProfileSource(t, sources, "sh.tangled.actor.profile")
 	require.Equal(t, "sh.tangled.actor.profile", tangled.Collection)
@@ -32,6 +42,12 @@ func TestEmbeddedProfileSources(t *testing.T) {
 		Avatar:      "$.avatar",
 		CreatedAt:   "$.createdAt",
 	}, tangled.Selectors)
+	require.NotNil(t, tangled.App)
+	require.Equal(t, "Tangled", tangled.App.Name)
+	require.Equal(t, "https://tangled.org/static/logos/dolly.svg", tangled.App.IconURL)
+	profileURL, err = tangled.App.ProfileURL(Identity{Handle: "anirudh.fi"})
+	require.NoError(t, err)
+	require.Equal(t, "https://tangled.org/anirudh.fi", profileURL)
 }
 
 func TestTangledProfileExtraction(t *testing.T) {
@@ -77,6 +93,84 @@ func TestTangledProfileExtraction(t *testing.T) {
 		ContentType: "image/png",
 		Size:        678939,
 	}, summary.AvatarRef)
+}
+
+func TestParseRemoteIconURL(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{
+		"https://app.example/icon.svg",
+		"https://app.example/icon.PNG?version=1",
+		"https://app.example/icon.jpg",
+		"https://app.example/icon.jpeg",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			parsed, err := parseRemoteIconURL(raw)
+			require.NoError(t, err)
+			require.Equal(t, raw, parsed.String())
+		})
+	}
+
+	for _, raw := range []string{
+		"http://app.example/icon.png",
+		"https://app.example/icon.gif",
+		"https://user@app.example/icon.png",
+		"https://app.example/icon.png#fragment",
+		"https://:443/icon.png",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			_, err := parseRemoteIconURL(raw)
+			require.ErrorContains(t, err, "must be an HTTPS SVG, PNG, or JPEG URL")
+		})
+	}
+}
+
+func TestNewProfileAppRejectsUnsafeURLs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		config profileAppConfig
+		want   string
+	}{
+		{
+			name: "insecure icon URL",
+			config: profileAppConfig{
+				Name:       "Example",
+				IconURL:    "http://app.example/icon.png",
+				ProfileURL: "https://app.example/{identifier}",
+			},
+			want: "iconURL must be an HTTPS SVG, PNG, or JPEG URL",
+		},
+		{
+			name: "insecure profile URL",
+			config: profileAppConfig{
+				Name:       "Example",
+				IconURL:    "https://app.example/icon.png",
+				ProfileURL: "javascript:alert({identifier})",
+			},
+			want: "profileURL must be an HTTPS URL",
+		},
+		{
+			name: "placeholder outside path",
+			config: profileAppConfig{
+				Name:       "Example",
+				IconURL:    "https://app.example/icon.png",
+				ProfileURL: "https://app.example/profile?id={identifier}",
+			},
+			want: "profileURL must contain exactly one {identifier} in its path",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := newProfileApp(test.config)
+			require.ErrorContains(t, err, test.want)
+		})
+	}
 }
 
 func requireProfileSource(

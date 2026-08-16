@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/bluesky-social/account-info/internal/profile"
@@ -118,7 +119,17 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	lookup.account.Avatar = "https://pds.example/xrpc/com.atproto.sync.getBlob?secret=upstream"
 	lookup.account.AvatarContentType = "image/jpeg"
 	lookup.account.Profiles[0].CID = "bafydefault"
+	lookup.account.Profiles[0].App = &profile.AppLink{
+		Name:    "Bluesky",
+		IconURL: "https://web-cdn.bsky.app/static/apple-touch-icon.png",
+		URL:     "https://bsky.app/profile/alice.example",
+	}
 	lookup.account.Profiles[1].CID = "bafyother"
+	lookup.account.Profiles[1].App = &profile.AppLink{
+		Name:    "Tangled",
+		IconURL: "https://tangled.org/static/logos/dolly.svg",
+		URL:     "https://tangled.org/alice.example",
+	}
 	response := requestAccountWithHeaders(
 		t,
 		lookup,
@@ -134,7 +145,7 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	require.Contains(
 		t,
 		response.Header().Get("Content-Security-Policy"),
-		"img-src 'self'",
+		"img-src 'self' https:",
 	)
 
 	body := response.Body.String()
@@ -154,6 +165,18 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	require.Contains(t, body, "Alice Example")
 	require.Contains(t, body, "Builder of reliable systems.")
 	require.Contains(t, body, `src="/avatar/alice.example/profile.jpg"`)
+	require.Contains(t, body, `href="https://bsky.app/profile/alice.example"`)
+	require.Contains(t, body, `src="https://web-cdn.bsky.app/static/apple-touch-icon.png"`)
+	require.Contains(t, body, `aria-label="Open @alice.example on Bluesky"`)
+	require.Contains(t, body, `href="https://tangled.org/alice.example"`)
+	require.Contains(t, body, `src="https://tangled.org/static/logos/dolly.svg"`)
+	require.Contains(t, body, `aria-label="Open @alice.example on Tangled"`)
+	handlePosition := strings.Index(body, `<p class="handle">`)
+	linksPosition := strings.Index(body, `<ul class="app-links"`)
+	descriptionPosition := strings.Index(body, `<p class="description">`)
+	require.GreaterOrEqual(t, handlePosition, 0)
+	require.Greater(t, linksPosition, handlePosition)
+	require.Greater(t, descriptionPosition, linksPosition)
 	require.NotContains(t, body, `id="identity-title"`)
 	require.NotContains(t, body, "did:plc:alice")
 	require.NotContains(t, body, "https://pds.example")
@@ -326,6 +349,11 @@ func TestAccountHandlerExplicitJSONPreservesPayloadForBrowser(t *testing.T) {
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
 	lookup.account.Default = "app.bsky.actor.profile"
+	lookup.account.Profiles[0].App = &profile.AppLink{
+		Name:    "Bluesky",
+		IconURL: "https://web-cdn.bsky.app/static/apple-touch-icon.png",
+		URL:     "https://bsky.app/profile/alice.example",
+	}
 	response := requestAccountWithHeaders(
 		t,
 		lookup,
@@ -340,6 +368,7 @@ func TestAccountHandlerExplicitJSONPreservesPayloadForBrowser(t *testing.T) {
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Len(t, body.Profiles, 2)
 	require.NotContains(t, response.Body.String(), "bsky.app")
+	require.NotContains(t, response.Body.String(), "apple-touch-icon.png")
 }
 
 func TestAccountHandlerRejectsUnacceptableRepresentationBeforeLookup(t *testing.T) {
