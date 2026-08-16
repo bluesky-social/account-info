@@ -64,6 +64,22 @@ func TestEmbeddedProfileSources(t *testing.T) {
 	profileURL, err = grain.App.ProfileURL(Identity{Handle: "joebasser.com"})
 	require.NoError(t, err)
 	require.Equal(t, "https://grain.social/profile/joebasser.com", profileURL)
+
+	spark := requireProfileSource(t, sources, "so.sprk.actor.profile")
+	require.Equal(t, "so.sprk.actor.profile", spark.Collection)
+	require.Equal(t, "self", spark.RecordKey)
+	require.Equal(t, ProfileSelectors{
+		DisplayName: "$.displayName",
+		Description: "$.description",
+		Avatar:      "$.avatar",
+		CreatedAt:   "$.createdAt",
+	}, spark.Selectors)
+	require.NotNil(t, spark.App)
+	require.Equal(t, "Spark", spark.App.Name)
+	require.Equal(t, "https://sprk.so/meta/apple-touch-icon.png", spark.App.IconURL)
+	profileURL, err = spark.App.ProfileURL(Identity{Handle: "joebasser.com"})
+	require.NoError(t, err)
+	require.Equal(t, "https://sprk.so/profile/joebasser.com", profileURL)
 }
 
 func TestTangledProfileExtraction(t *testing.T) {
@@ -149,6 +165,49 @@ func TestGrainProfileExtraction(t *testing.T) {
 	require.Equal(
 		t,
 		"https://suillus.us-west.host.bsky.network/xrpc/com.atproto.sync.getBlob?cid=bafkreicf4fsbv5eb4vyfxha55m5gnz6pp4ccfocsucyc2gvzeazpwfxhkm&did=did%3Aplc%3Aqed67d2sst5xqsbuveiv7fjp",
+		summary.Avatar,
+	)
+}
+
+func TestSparkProfileExtraction(t *testing.T) {
+	t.Parallel()
+
+	sources, err := parseProfileSources(accountinfo.ProfilesJSON())
+	require.NoError(t, err)
+	spark := requireProfileSource(t, sources, "so.sprk.actor.profile")
+	value := []byte(`{
+		"$type":"so.sprk.actor.profile",
+		"avatar":{
+			"ref":{"$link":"bafkreichh65megb3qxl5rxghb7ruxfw4tunnjymyaapl5vubmulxxuaxby"},
+			"size":191243,
+			"$type":"blob",
+			"mimeType":"image/jpeg"
+		},
+		"description":"Building this app",
+		"displayName":"Joe Basser"
+	}`)
+
+	summary, err := extractJSONProfile(
+		Identity{
+			DID: "did:plc:qed67d2sst5xqsbuveiv7fjp",
+			PDS: "https://suillus.us-west.host.bsky.network",
+		},
+		spark.Collection,
+		value,
+		spark.compiledSelectors,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "Joe Basser", summary.DisplayName)
+	require.Equal(t, "Building this app", summary.Description)
+	require.Empty(t, summary.CreatedAt)
+	require.Equal(t, &BlobRef{
+		CID:         "bafkreichh65megb3qxl5rxghb7ruxfw4tunnjymyaapl5vubmulxxuaxby",
+		ContentType: "image/jpeg",
+		Size:        191243,
+	}, summary.AvatarRef)
+	require.Equal(
+		t,
+		"https://suillus.us-west.host.bsky.network/xrpc/com.atproto.sync.getBlob?cid=bafkreichh65megb3qxl5rxghb7ruxfw4tunnjymyaapl5vubmulxxuaxby&did=did%3Aplc%3Aqed67d2sst5xqsbuveiv7fjp",
 		summary.Avatar,
 	)
 }

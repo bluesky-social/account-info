@@ -45,6 +45,21 @@
         "iconURL": "https://grain.social/icon-192.png",
         "profileURL": "https://grain.social/profile/{identifier}"
       }
+    },
+    {
+      "collection": "so.sprk.actor.profile",
+      "recordKey": "self",
+      "selectors": {
+        "displayName": "$.displayName",
+        "description": "$.description",
+        "avatar": "$.avatar",
+        "createdAt": "$.createdAt"
+      },
+      "app": {
+        "name": "Spark",
+        "iconURL": "https://sprk.so/meta/apple-touch-icon.png",
+        "profileURL": "https://sprk.so/profile/{identifier}"
+      }
     }
   ]
 }
