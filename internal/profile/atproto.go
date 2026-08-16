@@ -3,7 +3,6 @@ package profile
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,16 +10,14 @@ import (
 	"net/url"
 	"strings"
 
+	accountinfo "github.com/bluesky-social/account-info"
 	"github.com/jcalabro/atmos"
-	"github.com/jcalabro/atmos/api/bsky"
 	"github.com/jcalabro/atmos/api/comatproto"
 	"github.com/jcalabro/atmos/cbor"
 	"github.com/jcalabro/atmos/identity"
 	"github.com/jcalabro/atmos/xrpc"
 	"github.com/jcalabro/gt"
 )
-
-const profileRecordKey = "self"
 
 const maxAvatarSize int64 = 1_000_000
 
@@ -63,7 +60,7 @@ type atprotoRecordReader struct {
 func (r *atprotoRecordReader) Get(
 	ctx context.Context,
 	account Identity,
-	source Source,
+	source *Source,
 ) (Record, error) {
 	if err := validatePDSURL(account.PDS); err != nil {
 		return Record{}, fmt.Errorf("%w: %w", ErrNoPDS, err)
@@ -199,40 +196,6 @@ func validateAvatarRef(ref BlobRef) (cbor.CID, error) {
 	return cid, nil
 }
 
-func extractBlueskyProfile(
-	account Identity,
-	value json.RawMessage,
-) (Summary, error) {
-	var record bsky.ActorProfile
-	if err := json.Unmarshal(value, &record); err != nil {
-		return Summary{}, err
-	}
-
-	summary := Summary{
-		DisplayName: record.DisplayName.ValOr(""),
-		Description: record.Description.ValOr(""),
-		CreatedAt:   record.CreatedAt.ValOr(""),
-	}
-	if record.Avatar.HasVal() {
-		blob := record.Avatar.Val()
-		avatarURL, err := blobURL(
-			account.PDS,
-			account.DID,
-			blob.Ref.Link,
-		)
-		if err != nil {
-			return Summary{}, fmt.Errorf("build avatar URL: %w", err)
-		}
-		summary.Avatar = avatarURL
-		summary.AvatarRef = &BlobRef{
-			CID:         blob.Ref.Link,
-			ContentType: blob.MimeType,
-			Size:        blob.Size,
-		}
-	}
-	return summary, nil
-}
-
 // validatePDSURL rejects PDS endpoints that are not plain https origins.
 // The IP-level SSRF guard lives in the dial hook (httpclient.go); this
 // catches malformed schemes before a request is even attempted.
@@ -272,6 +235,10 @@ func NewDefaultService(cacheConfig CacheConfig) (*Service, error) {
 	if err := cacheConfig.validate(); err != nil {
 		return nil, err
 	}
+	sources, err := parseProfileSources(accountinfo.ProfilesJSON())
+	if err != nil {
+		return nil, fmt.Errorf("configure profile sources: %w", err)
+	}
 
 	// One public-only client is shared by identity resolution and record
 	// reads: every outbound host (PLC directory aside, handle domains, DID
@@ -284,39 +251,18 @@ func NewDefaultService(cacheConfig CacheConfig) (*Service, error) {
 			},
 		},
 	}
-	service := NewService(
+	service, err := NewService(
 		resolver,
 		&atprotoRecordReader{httpClient: httpClient},
-		Source{
-			Collection: bsky.NSIDActorProfile,
-			RecordKey:  profileRecordKey,
-			Extract:    extractBlueskyProfile,
-			App: &ProfileApp{
-				Name:       "Bluesky",
-				Icon:       "bluesky",
-				ProfileURL: blueskyProfileURL,
-			},
-		},
+		sources...,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("configure profile service: %w", err)
+	}
 	service.cache = newAccountCache(
 		cacheConfig.TTL,
 		cacheConfig.ErrorTTL,
 		cacheConfig.MaxEntries,
 	)
 	return service, nil
-}
-
-func blueskyProfileURL(accountIdentity Identity) (string, error) {
-	identifier := accountIdentity.Handle
-	if identifier == "" {
-		identifier = accountIdentity.DID
-	}
-	if identifier == "" {
-		return "", fmt.Errorf("identity has no handle or DID")
-	}
-	return (&url.URL{
-		Scheme: "https",
-		Host:   "bsky.app",
-		Path:   "/profile/" + identifier,
-	}).String(), nil
 }

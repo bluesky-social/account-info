@@ -46,7 +46,7 @@ func Serve(
 		MaxEntries: cacheMaxEntries,
 	})
 	if err != nil {
-		return fmt.Errorf("configure account cache: %w", err)
+		return fmt.Errorf("configure profile service: %w", err)
 	}
 
 	server := &http.Server{

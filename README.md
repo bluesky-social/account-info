@@ -29,6 +29,19 @@ curl -H 'Accept: application/json' https://account.info/bsky.app
 curl -H 'Accept: text/html' https://account.info/bsky.app
 ```
 
+## Supported profile records
+
+Supported record types are declared in [`profiles.json`](profiles.json). Each
+entry identifies the collection and record key to fetch from the account's PDS
+and provides singular [RFC 9535 JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html)
+expressions for `displayName`, `description`, `avatar`, and `createdAt`.
+Selected values populate the top-level account summary; the complete record is
+always returned under `profiles`.
+
+An entry may also define application-link metadata. Its `profileURL` must be an
+HTTPS URL containing one `{identifier}` placeholder in the path. New icon names
+require a matching SVG in `internal/web/assets/apps`.
+
 ## Avatars
 
 The canonical avatar endpoint serves the profile's original JPEG, PNG, or WebP:

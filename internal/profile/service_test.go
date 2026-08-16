@@ -31,7 +31,7 @@ type fakeReader struct {
 func (f *fakeReader) Get(
 	_ context.Context,
 	_ Identity,
-	source Source,
+	source *Source,
 ) (Record, error) {
 	if err := f.errors[source.Collection]; err != nil {
 		return Record{}, err
@@ -51,6 +51,38 @@ func (f *fakeReader) GetBlob(
 	return f.avatar, f.avatarErr
 }
 
+func mustNewTestService(
+	t testing.TB,
+	resolver identityResolver,
+	reader recordReader,
+	sources ...Source,
+) *Service {
+	t.Helper()
+	for index := range sources {
+		if sources[index].Extract == nil && !sources[index].Selectors.configured() {
+			sources[index].Extract = func(Identity, json.RawMessage) (Summary, error) {
+				return Summary{}, nil
+			}
+		}
+	}
+	service, err := NewService(resolver, reader, sources...)
+	require.NoError(t, err)
+	return service
+}
+
+func extractTestJSONProfile(
+	t testing.TB,
+	account Identity,
+	collection string,
+	value json.RawMessage,
+	selectors ProfileSelectors,
+) (Summary, error) {
+	t.Helper()
+	compiled, err := selectors.compile()
+	require.NoError(t, err)
+	return extractJSONProfile(account, collection, value, compiled)
+}
+
 func TestServiceLookup(t *testing.T) {
 	t.Parallel()
 
@@ -68,10 +100,17 @@ func TestServiceLookup(t *testing.T) {
 		"org.example.profile": {
 			Collection: "org.example.profile",
 			URI:        "at://did:plc:alice/org.example.profile/self",
-			Value:      json.RawMessage(`{"title":"Alice"}`),
+			Value: json.RawMessage(`{
+				"$type":"org.example.profile",
+				"profile":{
+					"name":"Alice",
+					"bio":"Builder",
+					"createdAt":"2024-01-02T03:04:05Z"
+				}
+			}`),
 		},
 	}}
-	service := NewService(
+	service := mustNewTestService(t,
 		&fakeResolver{identity: identity},
 		reader,
 		Source{
@@ -91,8 +130,11 @@ func TestServiceLookup(t *testing.T) {
 					return "https://app.example/profile/" + identity.Handle, nil
 				},
 			},
-			Extract: func(Identity, json.RawMessage) (Summary, error) {
-				return Summary{DisplayName: "Alice"}, nil
+			Selectors: ProfileSelectors{
+				DisplayName: "$.profile.name",
+				Description: "$.profile.bio",
+				Avatar:      "$.profile.avatar",
+				CreatedAt:   "$.profile.createdAt",
 			},
 		},
 	)
@@ -108,8 +150,14 @@ func TestServiceLookup(t *testing.T) {
 	require.Equal(t, identity.PDS, account.PDS)
 	require.Equal(t, "org.example.profile", account.Default)
 	require.Equal(t, "Alice", account.DisplayName)
+	require.Equal(t, "Builder", account.Description)
 	require.Len(t, account.Profiles, 1)
 	require.Equal(t, "org.example.profile", account.Profiles[0].Collection)
+	require.JSONEq(
+		t,
+		string(reader.records["org.example.profile"].Value),
+		string(account.Profiles[0].Value),
+	)
 	require.Equal(t, &AppLink{
 		Name: "Example App",
 		Icon: "example",
@@ -125,30 +173,44 @@ func TestServiceLookupSelectsOldestProfileAsDefault(t *testing.T) {
 		PDS: "https://pds.example",
 	}
 	reader := &fakeReader{records: map[string]Record{
-		"new.example.profile": {Collection: "new.example.profile"},
-		"old.example.profile": {Collection: "old.example.profile"},
+		"new.example.profile": {
+			Collection: "new.example.profile",
+			Value: json.RawMessage(`{
+				"$type":"new.example.profile",
+				"name":"New Alice",
+				"created":"2025-01-02T03:04:05Z"
+			}`),
+		},
+		"old.example.profile": {
+			Collection: "old.example.profile",
+			Value: json.RawMessage(`{
+				"$type":"old.example.profile",
+				"name":"Old Alice",
+				"created":"2024-01-02T03:04:05Z"
+			}`),
+		},
 	}}
-	service := NewService(
+	service := mustNewTestService(t,
 		&fakeResolver{identity: identity},
 		reader,
 		Source{
 			Collection: "new.example.profile",
 			RecordKey:  "self",
-			Extract: func(Identity, json.RawMessage) (Summary, error) {
-				return Summary{
-					DisplayName: "New Alice",
-					CreatedAt:   "2025-01-02T03:04:05Z",
-				}, nil
+			Selectors: ProfileSelectors{
+				DisplayName: "$.name",
+				Description: "$.bio",
+				Avatar:      "$.avatar",
+				CreatedAt:   "$.created",
 			},
 		},
 		Source{
 			Collection: "old.example.profile",
 			RecordKey:  "self",
-			Extract: func(Identity, json.RawMessage) (Summary, error) {
-				return Summary{
-					DisplayName: "Old Alice",
-					CreatedAt:   "2024-01-02T03:04:05Z",
-				}, nil
+			Selectors: ProfileSelectors{
+				DisplayName: "$.name",
+				Description: "$.bio",
+				Avatar:      "$.avatar",
+				CreatedAt:   "$.created",
 			},
 		},
 	)
@@ -169,7 +231,7 @@ func TestServiceLookupBreaksCreatedAtTiesByCollection(t *testing.T) {
 		"z.example.profile": {Collection: "z.example.profile"},
 		"a.example.profile": {Collection: "a.example.profile"},
 	}}
-	service := NewService(
+	service := mustNewTestService(t,
 		&fakeResolver{identity: identity},
 		reader,
 		Source{
@@ -212,7 +274,7 @@ func TestServiceLookupRejectsUnorderableProfiles(t *testing.T) {
 				"valid.example.profile":   {Collection: "valid.example.profile"},
 				"invalid.example.profile": {Collection: "invalid.example.profile"},
 			}}
-			service := NewService(
+			service := mustNewTestService(t,
 				&fakeResolver{identity: identity},
 				reader,
 				Source{
@@ -241,7 +303,7 @@ func TestServiceLookupRejectsUnorderableProfiles(t *testing.T) {
 func TestServiceLookupRejectsInvalidAppLink(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(
+	service := mustNewTestService(t,
 		&fakeResolver{identity: Identity{
 			DID:    "did:plc:alice",
 			Handle: "alice.example",
@@ -270,7 +332,7 @@ func TestServiceLookupRejectsInvalidAppLink(t *testing.T) {
 func TestServiceLookupAllSkipsMissingRecords(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(
+	service := mustNewTestService(t,
 		&fakeResolver{identity: Identity{
 			DID: "did:plc:alice",
 			PDS: "https://pds.example",
@@ -289,22 +351,108 @@ func TestServiceLookupAllSkipsMissingRecords(t *testing.T) {
 	require.Equal(t, "app.example.profile", account.Profiles[0].Collection)
 }
 
-func TestNewServiceDeduplicatesSources(t *testing.T) {
+func TestNewServiceRejectsDuplicateSources(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(
+	source := Source{
+		Collection: "app.example.profile",
+		RecordKey:  "self",
+		Extract: func(Identity, json.RawMessage) (Summary, error) {
+			return Summary{}, nil
+		},
+	}
+	_, err := NewService(
 		&fakeResolver{},
 		&fakeReader{},
-		Source{Collection: "app.example.profile", RecordKey: "self"},
-		Source{Collection: "app.example.profile", RecordKey: "self"},
-		Source{Collection: "org.example.profile", RecordKey: "self"},
+		source,
+		source,
 	)
+	require.ErrorContains(t, err, "duplicate profile source")
+}
 
-	require.Equal(
-		t,
-		[]string{"app.example.profile", "org.example.profile"},
-		service.Collections(),
-	)
+func TestNewServiceRejectsInvalidProfileSources(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		source Source
+		want   string
+	}{
+		{
+			name: "missing selectors",
+			source: Source{
+				Collection: "app.example.profile",
+				RecordKey:  "self",
+			},
+			want: "profile selectors are not configured",
+		},
+		{
+			name: "invalid selector",
+			source: Source{
+				Collection: "app.example.profile",
+				RecordKey:  "self",
+				Selectors: ProfileSelectors{
+					DisplayName: "displayName",
+					Description: "$.description",
+					Avatar:      "$.avatar",
+					CreatedAt:   "$.createdAt",
+				},
+			},
+			want: "invalid displayName selector",
+		},
+		{
+			name: "incomplete selectors",
+			source: Source{
+				Collection: "app.example.profile",
+				RecordKey:  "self",
+				Selectors: ProfileSelectors{
+					DisplayName: "$.displayName",
+					Description: "$.description",
+					Avatar:      "$.avatar",
+				},
+			},
+			want: "createdAt selector is empty",
+		},
+		{
+			name: "non-singular selector",
+			source: Source{
+				Collection: "app.example.profile",
+				RecordKey:  "self",
+				Selectors: ProfileSelectors{
+					DisplayName: "$..displayName",
+					Description: "$.description",
+					Avatar:      "$.avatar",
+					CreatedAt:   "$.createdAt",
+				},
+			},
+			want: "displayName selector must be singular",
+		},
+		{
+			name: "conflicting extraction strategies",
+			source: Source{
+				Collection: "app.example.profile",
+				RecordKey:  "self",
+				Selectors: ProfileSelectors{
+					DisplayName: "$.displayName",
+					Description: "$.description",
+					Avatar:      "$.avatar",
+					CreatedAt:   "$.createdAt",
+				},
+				Extract: func(Identity, json.RawMessage) (Summary, error) {
+					return Summary{}, nil
+				},
+			},
+			want: "both selectors and custom extractor are configured",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewService(&fakeResolver{}, &fakeReader{}, test.source)
+			require.ErrorContains(t, err, test.want)
+		})
+	}
 }
 
 func TestBlueskyProfileSummary(t *testing.T) {
@@ -317,15 +465,25 @@ func TestBlueskyProfileSummary(t *testing.T) {
 		"createdAt":"2024-01-02T03:04:05.123Z",
 		"avatar":{
 			"$type":"blob",
-			"ref":{"$link":"bafycid"},
+			"ref":{"$link":"bafkreiaff2bptwyp4fg7o533pplheq4l3bxuiltnhkxgwabqyvt4achj6q"},
 			"mimeType":"image/jpeg",
 			"size":123
 		}
 	}`)
-	summary, err := extractBlueskyProfile(Identity{
-		DID: "did:plc:alice",
-		PDS: "https://pds.example/",
-	}, value)
+	summary, err := extractTestJSONProfile(t,
+		Identity{
+			DID: "did:plc:alice",
+			PDS: "https://pds.example/",
+		},
+		"app.bsky.actor.profile",
+		value,
+		ProfileSelectors{
+			DisplayName: "$.displayName",
+			Description: "$.description",
+			Avatar:      "$.avatar",
+			CreatedAt:   "$.createdAt",
+		},
+	)
 	require.NoError(t, err)
 	require.Equal(t, "Alice", summary.DisplayName)
 	require.Equal(t, "Builder", summary.Description)
@@ -333,14 +491,138 @@ func TestBlueskyProfileSummary(t *testing.T) {
 	require.Equal(
 		t,
 		"https://pds.example/xrpc/com.atproto.sync.getBlob"+
-			"?cid=bafycid&did=did%3Aplc%3Aalice",
+			"?cid=bafkreiaff2bptwyp4fg7o533pplheq4l3bxuiltnhkxgwabqyvt4achj6q"+
+			"&did=did%3Aplc%3Aalice",
 		summary.Avatar,
 	)
 	require.Equal(t, &BlobRef{
-		CID:         "bafycid",
+		CID:         "bafkreiaff2bptwyp4fg7o533pplheq4l3bxuiltnhkxgwabqyvt4achj6q",
 		ContentType: "image/jpeg",
 		Size:        123,
 	}, summary.AvatarRef)
+}
+
+func TestExtractJSONProfileUsesConfiguredPointers(t *testing.T) {
+	t.Parallel()
+
+	value := json.RawMessage(`{
+		"$type":"example.actor.profile",
+		"profile":{
+			"name":"Alice",
+			"bio":"Builder",
+			"created":"2024-01-02T03:04:05.123Z",
+			"image":{
+				"$type":"blob",
+				"ref":{"$link":"bafkreiaff2bptwyp4fg7o533pplheq4l3bxuiltnhkxgwabqyvt4achj6q"},
+				"mimeType":"image/jpeg",
+				"size":898458
+			}
+		}
+	}`)
+	summary, err := extractTestJSONProfile(t,
+		Identity{DID: "did:plc:alice", PDS: "https://pds.example"},
+		"example.actor.profile",
+		value,
+		ProfileSelectors{
+			DisplayName: "$.profile.name",
+			Description: "$.profile.bio",
+			Avatar:      "$.profile.image",
+			CreatedAt:   "$.profile.created",
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "Alice", summary.DisplayName)
+	require.Equal(t, "Builder", summary.Description)
+	require.Equal(t, "2024-01-02T03:04:05.123Z", summary.CreatedAt)
+	require.Equal(t, &BlobRef{
+		CID:         "bafkreiaff2bptwyp4fg7o533pplheq4l3bxuiltnhkxgwabqyvt4achj6q",
+		ContentType: "image/jpeg",
+		Size:        898458,
+	}, summary.AvatarRef)
+	require.Equal(
+		t,
+		"https://pds.example/xrpc/com.atproto.sync.getBlob"+
+			"?cid=bafkreiaff2bptwyp4fg7o533pplheq4l3bxuiltnhkxgwabqyvt4achj6q"+
+			"&did=did%3Aplc%3Aalice",
+		summary.Avatar,
+	)
+}
+
+func TestExtractJSONProfileRejectsMismatchedRecordType(t *testing.T) {
+	t.Parallel()
+
+	_, err := extractTestJSONProfile(t,
+		Identity{},
+		"example.actor.profile",
+		json.RawMessage(`{"$type":"other.actor.profile"}`),
+		ProfileSelectors{
+			DisplayName: "$.displayName",
+			Description: "$.description",
+			Avatar:      "$.avatar",
+			CreatedAt:   "$.createdAt",
+		},
+	)
+	require.ErrorContains(t, err, "record type does not match collection")
+}
+
+func TestExtractJSONProfileAllowsAbsentOptionalValues(t *testing.T) {
+	t.Parallel()
+
+	summary, err := extractTestJSONProfile(t,
+		Identity{},
+		"example.actor.profile",
+		json.RawMessage(`{"$type":"example.actor.profile"}`),
+		ProfileSelectors{
+			DisplayName: "$.displayName",
+			Description: "$.description",
+			Avatar:      "$.avatar",
+			CreatedAt:   "$.createdAt",
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, Summary{}, summary)
+}
+
+func TestExtractJSONProfileRejectsInvalidSelectedValue(t *testing.T) {
+	t.Parallel()
+
+	_, err := extractTestJSONProfile(t,
+		Identity{},
+		"example.actor.profile",
+		json.RawMessage(`{
+			"$type":"example.actor.profile",
+			"displayName":42
+		}`),
+		ProfileSelectors{
+			DisplayName: "$.displayName",
+			Description: "$.description",
+			Avatar:      "$.avatar",
+			CreatedAt:   "$.createdAt",
+		},
+	)
+	require.ErrorContains(t, err, "extract displayName")
+	require.ErrorContains(t, err, "selected value is not a string")
+}
+
+func TestJSONPathSelectsQuotedPropertyNames(t *testing.T) {
+	t.Parallel()
+
+	summary, err := extractTestJSONProfile(t,
+		Identity{},
+		"example.actor.profile",
+		json.RawMessage(`{
+			"$type":"example.actor.profile",
+			"a/b":{"~name":"value"}
+		}`),
+		ProfileSelectors{
+			DisplayName: "$['a/b']['~name']",
+			Description: "$.description",
+			Avatar:      "$.avatar",
+			CreatedAt:   "$.createdAt",
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "value", summary.DisplayName)
 }
 
 func TestServiceAvatar(t *testing.T) {
@@ -356,7 +638,7 @@ func TestServiceAvatar(t *testing.T) {
 		},
 		avatar: want,
 	}
-	service := NewService(
+	service := mustNewTestService(t,
 		&fakeResolver{identity: Identity{DID: "did:plc:alice", PDS: "https://pds.example"}},
 		reader,
 		Source{
@@ -380,7 +662,7 @@ func TestServiceAvatar(t *testing.T) {
 func TestServiceLookupExposesAvatarContentType(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(
+	service := mustNewTestService(t,
 		&fakeResolver{identity: Identity{
 			DID:    "did:plc:alice",
 			Handle: "alice.example",
@@ -434,7 +716,7 @@ func TestServiceAvatarErrors(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			service := NewService(
+			service := mustNewTestService(t,
 				&fakeResolver{identity: Identity{DID: "did:plc:alice", PDS: "https://pds.example"}},
 				&fakeReader{records: test.records},
 				Source{Collection: "app.example.profile", RecordKey: "self", Extract: test.extract},
@@ -481,7 +763,7 @@ func TestServiceLookupErrors(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := NewService(
+			service := mustNewTestService(t,
 				&fakeResolver{identity: test.identity},
 				&fakeReader{},
 				Source{Collection: "app.example.profile", RecordKey: "self"},
@@ -500,7 +782,7 @@ func TestServiceLookupPropagatesReaderError(t *testing.T) {
 	t.Parallel()
 
 	upstreamErr := errors.New("upstream failure")
-	service := NewService(
+	service := mustNewTestService(t,
 		&fakeResolver{identity: Identity{
 			DID: "did:plc:alice",
 			PDS: "https://pds.example",

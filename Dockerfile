@@ -10,6 +10,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
+COPY profiles_config.go profiles.json ./
 COPY cmd/ cmd/
 COPY internal/ internal/
 

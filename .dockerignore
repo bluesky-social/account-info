@@ -2,6 +2,8 @@
 !Dockerfile
 !go.mod
 !go.sum
+!profiles_config.go
+!profiles.json
 !cmd/
 !cmd/**
 !internal/

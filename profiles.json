@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "collection": "app.bsky.actor.profile",
+      "recordKey": "self",
+      "selectors": {
+        "displayName": "$.displayName",
+        "description": "$.description",
+        "avatar": "$.avatar",
+        "createdAt": "$.createdAt"
+      },
+      "app": {
+        "name": "Bluesky",
+        "icon": "bluesky",
+        "profileURL": "https://bsky.app/profile/{identifier}"
+      }
+    }
+  ]
+}

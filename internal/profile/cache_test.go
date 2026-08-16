@@ -120,7 +120,7 @@ func TestServiceLookupCachesSuccessfulAccountsAndErrors(t *testing.T) {
 			PDS: "https://pds.example",
 		},
 	}
-	service := NewService(
+	service := mustNewTestService(t,
 		resolver,
 		&fakeReader{records: map[string]Record{}},
 		Source{Collection: "app.example.profile", RecordKey: "self"},
@@ -153,7 +153,7 @@ func TestServiceLookupDoesNotCacheContextErrors(t *testing.T) {
 	t.Parallel()
 
 	resolver := &countingResolver{err: context.DeadlineExceeded}
-	service := NewService(
+	service := mustNewTestService(t,
 		resolver,
 		&fakeReader{},
 		Source{Collection: "app.example.profile", RecordKey: "self"},

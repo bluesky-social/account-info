@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/jcalabro/atmos"
 )
 
 var (
@@ -47,10 +49,41 @@ type Avatar struct {
 
 // Source describes an allowlisted profile record type.
 type Source struct {
-	Collection string
-	RecordKey  string
-	Extract    func(Identity, json.RawMessage) (Summary, error)
-	App        *ProfileApp
+	Collection        string
+	RecordKey         string
+	Selectors         ProfileSelectors
+	Extract           func(Identity, json.RawMessage) (Summary, error)
+	App               *ProfileApp
+	compiledSelectors *compiledProfileSelectors
+}
+
+func (s *Source) validate() error {
+	if s.Collection == "" {
+		return fmt.Errorf("collection is empty")
+	}
+	if _, err := atmos.ParseNSID(s.Collection); err != nil {
+		return fmt.Errorf("invalid collection: %w", err)
+	}
+	if s.RecordKey == "" {
+		return fmt.Errorf("record key is empty")
+	}
+	if _, err := atmos.ParseRecordKey(s.RecordKey); err != nil {
+		return fmt.Errorf("invalid record key: %w", err)
+	}
+	if s.Extract != nil && s.Selectors.configured() {
+		return fmt.Errorf("both selectors and custom extractor are configured")
+	}
+	if s.Extract == nil && !s.Selectors.configured() {
+		return fmt.Errorf("profile selectors are not configured")
+	}
+	if s.Selectors.configured() {
+		compiled, err := s.Selectors.compile()
+		if err != nil {
+			return err
+		}
+		s.compiledSelectors = compiled
+	}
+	return nil
 }
 
 // ProfileApp describes how a profile record links to its application.
@@ -114,7 +147,7 @@ type identityResolver interface {
 }
 
 type recordReader interface {
-	Get(context.Context, Identity, Source) (Record, error)
+	Get(context.Context, Identity, *Source) (Record, error)
 	GetBlob(context.Context, Identity, BlobRef) (Avatar, error)
 }
 
@@ -132,7 +165,7 @@ func NewService(
 	resolver identityResolver,
 	reader recordReader,
 	sources ...Source,
-) *Service {
+) (*Service, error) {
 	service := &Service{
 		resolver: resolver,
 		reader:   reader,
@@ -140,12 +173,16 @@ func NewService(
 		order:    make([]string, 0, len(sources)),
 	}
 	for _, source := range sources {
-		if _, exists := service.sources[source.Collection]; !exists {
-			service.order = append(service.order, source.Collection)
+		if err := source.validate(); err != nil {
+			return nil, fmt.Errorf("profile source %q: %w", source.Collection, err)
 		}
+		if _, exists := service.sources[source.Collection]; exists {
+			return nil, fmt.Errorf("duplicate profile source %q", source.Collection)
+		}
+		service.order = append(service.order, source.Collection)
 		service.sources[source.Collection] = source
 	}
-	return service
+	return service, nil
 }
 
 // Avatar resolves an account and retrieves its selected profile image.
@@ -225,7 +262,7 @@ func (s *Service) lookup(
 	summaries := make([]Summary, 0, len(sources))
 
 	for _, source := range sources {
-		record, getErr := s.reader.Get(ctx, identity, source)
+		record, getErr := s.reader.Get(ctx, identity, &source)
 		if errors.Is(getErr, ErrRecordNotFound) {
 			continue
 		}
@@ -246,6 +283,20 @@ func (s *Service) lookup(
 		var summary Summary
 		if source.Extract != nil {
 			summary, getErr = source.Extract(identity, record.Value)
+			if getErr != nil {
+				return Account{}, fmt.Errorf(
+					"extract %s: %w",
+					source.Collection,
+					getErr,
+				)
+			}
+		} else if source.Selectors.configured() {
+			summary, getErr = extractJSONProfile(
+				identity,
+				source.Collection,
+				record.Value,
+				source.compiledSelectors,
+			)
 			if getErr != nil {
 				return Account{}, fmt.Errorf(
 					"extract %s: %w",
