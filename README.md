@@ -31,7 +31,7 @@ curl -H 'Accept: text/html' https://account.info/bsky.app
 
 ## Avatars
 
-The canonical avatar endpoint serves the profile's original JPEG or PNG:
+The canonical avatar endpoint serves the profile's original JPEG, PNG, or WebP:
 
 ```console
 curl -o avatar https://account.info/avatar/bsky.app
@@ -46,8 +46,8 @@ curl -L -H 'Accept: image/*' https://account.info/bsky.app -o avatar
 ```
 
 Avatar responses include a strong ETag derived from the blob CID and are
-publicly cacheable for five minutes. Only the AT Protocol profile lexicon's
-JPEG and PNG types are served, with its 1 MB size limit enforced.
+publicly cacheable for five minutes. JPEG, PNG, and WebP images are served,
+with the AT Protocol profile lexicon's 1 MB size limit enforced.
 
 ## Link previews
 

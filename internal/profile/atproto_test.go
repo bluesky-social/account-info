@@ -110,30 +110,60 @@ func TestRecordReaderRejectsNonHTTPSPDS(t *testing.T) {
 func TestRecordReaderGetsVerifiedAvatarBlob(t *testing.T) {
 	t.Parallel()
 
-	content := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
-	cid := cbor.ComputeCID(cbor.CodecRaw, content).String()
-	server := httptest.NewTLSServer(http.HandlerFunc(
-		func(w http.ResponseWriter, request *http.Request) {
-			require.Equal(t, "/xrpc/com.atproto.sync.getBlob", request.URL.Path)
-			require.Equal(t, "did:plc:alice", request.URL.Query().Get("did"))
-			require.Equal(t, cid, request.URL.Query().Get("cid"))
-			require.Equal(t, "image/png, image/jpeg", request.Header.Get("Accept"))
-			w.Header().Set("Content-Type", "application/octet-stream")
-			_, _ = w.Write(content)
+	tests := []struct {
+		name        string
+		contentType string
+		content     []byte
+	}{
+		{
+			name:        "PNG",
+			contentType: "image/png",
+			content:     []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'},
 		},
-	))
-	defer server.Close()
+		{
+			name:        "WebP",
+			contentType: "image/webp",
+			content:     []byte("RIFF\x00\x00\x00\x00WEBPVP8 "),
+		},
+	}
 
-	reader := &atprotoRecordReader{httpClient: server.Client()}
-	avatar, err := reader.GetBlob(
-		context.Background(),
-		Identity{DID: "did:plc:alice", PDS: server.URL},
-		BlobRef{CID: cid, ContentType: "image/png", Size: int64(len(content))},
-	)
-	require.NoError(t, err)
-	require.Equal(t, content, avatar.Content)
-	require.Equal(t, "image/png", avatar.ContentType)
-	require.Equal(t, cid, avatar.CID)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			cid := cbor.ComputeCID(cbor.CodecRaw, test.content).String()
+			server := httptest.NewTLSServer(http.HandlerFunc(
+				func(w http.ResponseWriter, request *http.Request) {
+					require.Equal(t, "/xrpc/com.atproto.sync.getBlob", request.URL.Path)
+					require.Equal(t, "did:plc:alice", request.URL.Query().Get("did"))
+					require.Equal(t, cid, request.URL.Query().Get("cid"))
+					require.Equal(
+						t,
+						"image/png, image/jpeg, image/webp",
+						request.Header.Get("Accept"),
+					)
+					w.Header().Set("Content-Type", "application/octet-stream")
+					_, _ = w.Write(test.content)
+				},
+			))
+			defer server.Close()
+
+			reader := &atprotoRecordReader{httpClient: server.Client()}
+			avatar, err := reader.GetBlob(
+				context.Background(),
+				Identity{DID: "did:plc:alice", PDS: server.URL},
+				BlobRef{
+					CID:         cid,
+					ContentType: test.contentType,
+					Size:        int64(len(test.content)),
+				},
+			)
+			require.NoError(t, err)
+			require.Equal(t, test.content, avatar.Content)
+			require.Equal(t, test.contentType, avatar.ContentType)
+			require.Equal(t, cid, avatar.CID)
+		})
+	}
 }
 
 func TestRecordReaderRejectsInvalidAvatarBlob(t *testing.T) {

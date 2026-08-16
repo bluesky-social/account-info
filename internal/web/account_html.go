@@ -187,6 +187,8 @@ func avatarFilename(contentType string) (string, error) {
 		return "profile.jpg", nil
 	case "image/png":
 		return "profile.png", nil
+	case "image/webp":
+		return "profile.webp", nil
 	default:
 		return "", fmt.Errorf("unsupported avatar content type %q", contentType)
 	}

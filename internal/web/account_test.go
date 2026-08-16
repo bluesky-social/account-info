@@ -191,6 +191,32 @@ func TestAccountHandlerRendersHTMLForLinkPreviewCrawler(t *testing.T) {
 	require.Contains(t, body, `<link rel="image_src" href="https://account.info/avatar/alice.example/profile.png">`)
 }
 
+func TestAccountHandlerRendersWebPAvatar(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(1)}
+	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Avatar = "https://pds.example/xrpc/com.atproto.sync.getBlob"
+	lookup.account.AvatarContentType = "image/webp"
+	response := requestAccountWithHeaders(
+		t,
+		lookup,
+		"/alice.example",
+		"text/html",
+		"Mozilla/5.0 Firefox/141.0",
+	)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "text/html; charset=utf-8", response.Header().Get("Content-Type"))
+	body := response.Body.String()
+	require.Contains(t, body, `src="/avatar/alice.example/profile.webp"`)
+	require.Contains(
+		t,
+		body,
+		`<meta property="og:image:type" content="image/webp">`,
+	)
+}
+
 func TestAccountHandlerRendersAllProfilesWithoutAuthority(t *testing.T) {
 	t.Parallel()
 
@@ -438,23 +464,33 @@ func TestAvatarHandlerServesCacheableImage(t *testing.T) {
 func TestAvatarHandlerServesExtensionBearingPreviewURL(t *testing.T) {
 	t.Parallel()
 
-	content := []byte("verified image bytes")
-	lookup := &fakeAccountLookup{avatar: profile.Avatar{
-		Content:     content,
-		ContentType: "image/jpeg",
-		CID:         "bafkreicid",
-	}}
-	response := requestAccountWithAccept(
-		t,
-		lookup,
-		"/avatar/alice.example/profile.jpg",
-		"image/*",
-	)
+	tests := []struct {
+		name        string
+		contentType string
+		path        string
+	}{
+		{name: "JPEG", contentType: "image/jpeg", path: "/avatar/alice.example/profile.jpg"},
+		{name: "WebP", contentType: "image/webp", path: "/avatar/alice.example/profile.webp"},
+	}
 
-	require.Equal(t, http.StatusOK, response.Code)
-	require.Equal(t, "alice.example", lookup.avatarID)
-	require.Equal(t, content, response.Body.Bytes())
-	require.Equal(t, "image/jpeg", response.Header().Get("Content-Type"))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			content := []byte("verified image bytes")
+			lookup := &fakeAccountLookup{avatar: profile.Avatar{
+				Content:     content,
+				ContentType: test.contentType,
+				CID:         "bafkreicid",
+			}}
+			response := requestAccountWithAccept(t, lookup, test.path, "image/*")
+
+			require.Equal(t, http.StatusOK, response.Code)
+			require.Equal(t, "alice.example", lookup.avatarID)
+			require.Equal(t, content, response.Body.Bytes())
+			require.Equal(t, test.contentType, response.Header().Get("Content-Type"))
+		})
+	}
 }
 
 func TestAvatarHandlerHonorsConditionalRequest(t *testing.T) {

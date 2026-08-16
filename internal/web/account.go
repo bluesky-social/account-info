@@ -140,7 +140,7 @@ type lookupFailure struct {
 func handleAvatar(accounts accountLookup) http.HandlerFunc {
 	return func(w http.ResponseWriter, request *http.Request) {
 		if file := request.PathValue("file"); file != "" &&
-			file != "profile.jpg" && file != "profile.png" {
+			file != "profile.jpg" && file != "profile.png" && file != "profile.webp" {
 			http.NotFound(w, request)
 			return
 		}
@@ -162,6 +162,8 @@ func handleAvatar(accounts accountLookup) http.HandlerFunc {
 			extension = ".jpg"
 		case "image/png":
 			extension = ".png"
+		case "image/webp":
+			extension = ".webp"
 		}
 		w.Header().Set("Content-Type", avatar.ContentType)
 		w.Header().Set("Content-Disposition", "inline; filename=avatar"+extension)

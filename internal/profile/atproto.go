@@ -131,7 +131,7 @@ func (r *atprotoRecordReader) GetBlob(
 	if err != nil {
 		return Avatar{}, fmt.Errorf("build blob request: %w", err)
 	}
-	request.Header.Set("Accept", "image/png, image/jpeg")
+	request.Header.Set("Accept", "image/png, image/jpeg, image/webp")
 
 	response, err := r.httpClient.Do(request)
 	if err != nil {
@@ -181,7 +181,9 @@ func (r *atprotoRecordReader) GetBlob(
 }
 
 func validateAvatarRef(ref BlobRef) (cbor.CID, error) {
-	if ref.ContentType != "image/png" && ref.ContentType != "image/jpeg" {
+	if ref.ContentType != "image/png" &&
+		ref.ContentType != "image/jpeg" &&
+		ref.ContentType != "image/webp" {
 		return cbor.CID{}, fmt.Errorf("unsupported avatar content type %q", ref.ContentType)
 	}
 	if ref.Size <= 0 || ref.Size > maxAvatarSize {
