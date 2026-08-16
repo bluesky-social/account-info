@@ -123,7 +123,6 @@ func TestServiceLookupCachesSuccessfulAccountsAndErrors(t *testing.T) {
 	service := NewService(
 		resolver,
 		&fakeReader{records: map[string]Record{}},
-		"app.example.profile",
 		Source{Collection: "app.example.profile", RecordKey: "self"},
 	)
 	now := time.Date(2026, time.August, 13, 12, 0, 0, 0, time.UTC)
@@ -157,7 +156,6 @@ func TestServiceLookupDoesNotCacheContextErrors(t *testing.T) {
 	service := NewService(
 		resolver,
 		&fakeReader{},
-		"app.example.profile",
 		Source{Collection: "app.example.profile", RecordKey: "self"},
 	)
 	service.cache = newAccountCache(time.Minute, 30*time.Second, 2)

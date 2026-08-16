@@ -35,7 +35,6 @@ type accountPage struct {
 	AvatarURL         string
 	AvatarAlt         string
 	AvatarContentType string
-	HasDefault        bool
 	Profiles          []accountPageProfile
 }
 
@@ -103,9 +102,9 @@ func newAccountPage(account *profile.Account) (accountPage, error) {
 	}
 	escapedLabel := url.PathEscape(label)
 
-	defaultCollection := account.Authoritative
-	if defaultCollection == "" && len(account.Profiles) == 1 {
-		defaultCollection = account.Profiles[0].Collection
+	defaultCollection := account.Default
+	if defaultCollection == "" {
+		return accountPage{}, fmt.Errorf("default profile collection is empty")
 	}
 	page := accountPage{
 		Styles:          template.CSS(stylesheet),
@@ -152,7 +151,6 @@ func newAccountPage(account *profile.Account) (accountPage, error) {
 			)
 		}
 		isDefault := record.Collection == defaultCollection
-		page.HasDefault = page.HasDefault || isDefault
 		pageProfile := accountPageProfile{
 			Collection: record.Collection,
 			URI:        record.URI,
@@ -172,7 +170,7 @@ func newAccountPage(account *profile.Account) (accountPage, error) {
 		}
 		page.Profiles = append(page.Profiles, pageProfile)
 	}
-	if defaultCollection != "" && !page.HasDefault {
+	if _, exists := seen[defaultCollection]; !exists {
 		return accountPage{}, fmt.Errorf(
 			"default profile collection is missing: %s",
 			defaultCollection,

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 )
 
 var (
@@ -26,8 +27,8 @@ var (
 	ErrProfileNotFound = errors.New("profile not found")
 	// ErrAvatarNotFound indicates that the selected profile has no avatar.
 	ErrAvatarNotFound = errors.New("avatar not found")
-	// ErrMultipleProfiles indicates that no authoritative profile can be selected.
-	ErrMultipleProfiles = errors.New("multiple profiles without an authority")
+	// ErrProfileCreatedAt indicates that multiple profiles cannot be ordered by age.
+	ErrProfileCreatedAt = errors.New("profile createdAt is missing or invalid")
 )
 
 // BlobRef identifies an avatar blob declared by a profile record.
@@ -73,6 +74,7 @@ type Summary struct {
 	Description string   `json:"description,omitempty"`
 	Avatar      string   `json:"avatar,omitempty"`
 	AvatarRef   *BlobRef `json:"-"`
+	CreatedAt   string   `json:"-"`
 }
 
 // Identity contains the account location needed to retrieve profile records.
@@ -93,13 +95,13 @@ type Record struct {
 
 // Account contains a resolved identity and its available profile records.
 type Account struct {
-	DID           string `json:"did"`
-	Handle        string `json:"handle,omitempty"`
-	PDS           string `json:"pds"`
-	Authoritative string `json:"authoritative,omitempty"`
-	DisplayName   string `json:"displayName,omitempty"`
-	Description   string `json:"description,omitempty"`
-	Avatar        string `json:"avatar,omitempty"`
+	DID         string `json:"did"`
+	Handle      string `json:"handle,omitempty"`
+	PDS         string `json:"pds"`
+	Default     string `json:"default,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
+	Description string `json:"description,omitempty"`
+	Avatar      string `json:"avatar,omitempty"`
 	// AvatarContentType describes Avatar without exposing the private blob
 	// reference in JSON. Web representations use it to build a typed image URL.
 	AvatarContentType string   `json:"-"`
@@ -118,27 +120,24 @@ type recordReader interface {
 
 // Service retrieves profile records from allowlisted collections.
 type Service struct {
-	resolver      identityResolver
-	reader        recordReader
-	authoritative string
-	sources       map[string]Source
-	order         []string
-	cache         *accountCache
+	resolver identityResolver
+	reader   recordReader
+	sources  map[string]Source
+	order    []string
+	cache    *accountCache
 }
 
-// NewService constructs a profile service with a temporary authority policy.
+// NewService constructs a profile service from the known profile sources.
 func NewService(
 	resolver identityResolver,
 	reader recordReader,
-	authoritative string,
 	sources ...Source,
 ) *Service {
 	service := &Service{
-		resolver:      resolver,
-		reader:        reader,
-		authoritative: authoritative,
-		sources:       make(map[string]Source, len(sources)),
-		order:         make([]string, 0, len(sources)),
+		resolver: resolver,
+		reader:   reader,
+		sources:  make(map[string]Source, len(sources)),
+		order:    make([]string, 0, len(sources)),
 	}
 	for _, source := range sources {
 		if _, exists := service.sources[source.Collection]; !exists {
@@ -157,9 +156,6 @@ func (s *Service) Avatar(ctx context.Context, identifier string) (Avatar, error)
 	}
 	if len(account.Profiles) == 0 {
 		return Avatar{}, ErrProfileNotFound
-	}
-	if account.Authoritative == "" && len(account.Profiles) > 1 {
-		return Avatar{}, ErrMultipleProfiles
 	}
 	if account.avatarRef == nil {
 		return Avatar{}, ErrAvatarNotFound
@@ -226,6 +222,7 @@ func (s *Service) lookup(
 		PDS:      identity.PDS,
 		Profiles: make([]Record, 0, len(sources)),
 	}
+	summaries := make([]Summary, 0, len(sources))
 
 	for _, source := range sources {
 		record, getErr := s.reader.Get(ctx, identity, source)
@@ -258,14 +255,67 @@ func (s *Service) lookup(
 			}
 		}
 		account.Profiles = append(account.Profiles, record)
-		if record.Collection == s.authoritative {
-			account.Authoritative = record.Collection
-			applySummary(&account, summary)
-		} else if len(account.Profiles) == 1 {
-			applySummary(&account, summary)
-		}
+		summaries = append(summaries, summary)
+	}
+	if err := selectDefaultProfile(&account, summaries); err != nil {
+		return Account{}, err
 	}
 	return account, nil
+}
+
+func selectDefaultProfile(account *Account, summaries []Summary) error {
+	if len(account.Profiles) == 0 {
+		return nil
+	}
+	if len(account.Profiles) != len(summaries) {
+		return fmt.Errorf("profile and summary counts differ")
+	}
+
+	selected := 0
+	if len(account.Profiles) > 1 {
+		oldest, err := parseProfileCreatedAt(
+			account.Profiles[0].Collection,
+			summaries[0].CreatedAt,
+		)
+		if err != nil {
+			return err
+		}
+		for index := 1; index < len(account.Profiles); index++ {
+			createdAt, parseErr := parseProfileCreatedAt(
+				account.Profiles[index].Collection,
+				summaries[index].CreatedAt,
+			)
+			if parseErr != nil {
+				return parseErr
+			}
+			if createdAt.Before(oldest) ||
+				(createdAt.Equal(oldest) &&
+					account.Profiles[index].Collection < account.Profiles[selected].Collection) {
+				selected = index
+				oldest = createdAt
+			}
+		}
+	}
+
+	account.Default = account.Profiles[selected].Collection
+	applySummary(account, summaries[selected])
+	return nil
+}
+
+func parseProfileCreatedAt(collection, raw string) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, fmt.Errorf("%w: %s", ErrProfileCreatedAt, collection)
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf(
+			"%w: %s: %w",
+			ErrProfileCreatedAt,
+			collection,
+			err,
+		)
+	}
+	return createdAt, nil
 }
 
 func resolveAppLink(identity Identity, app *ProfileApp) (AppLink, error) {

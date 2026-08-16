@@ -74,12 +74,11 @@ func TestServiceLookup(t *testing.T) {
 	service := NewService(
 		&fakeResolver{identity: identity},
 		reader,
-		"app.example.profile",
 		Source{
 			Collection: "app.example.profile",
 			RecordKey:  "self",
 			Extract: func(Identity, json.RawMessage) (Summary, error) {
-				return Summary{DisplayName: "Authoritative Alice"}, nil
+				return Summary{DisplayName: "App Alice"}, nil
 			},
 		},
 		Source{
@@ -107,7 +106,7 @@ func TestServiceLookup(t *testing.T) {
 	require.Equal(t, identity.DID, account.DID)
 	require.Equal(t, identity.Handle, account.Handle)
 	require.Equal(t, identity.PDS, account.PDS)
-	require.Empty(t, account.Authoritative)
+	require.Equal(t, "org.example.profile", account.Default)
 	require.Equal(t, "Alice", account.DisplayName)
 	require.Len(t, account.Profiles, 1)
 	require.Equal(t, "org.example.profile", account.Profiles[0].Collection)
@@ -116,6 +115,127 @@ func TestServiceLookup(t *testing.T) {
 		Icon: "example",
 		URL:  "https://app.example/profile/alice.example",
 	}, account.Profiles[0].App)
+}
+
+func TestServiceLookupSelectsOldestProfileAsDefault(t *testing.T) {
+	t.Parallel()
+
+	identity := Identity{
+		DID: "did:plc:alice",
+		PDS: "https://pds.example",
+	}
+	reader := &fakeReader{records: map[string]Record{
+		"new.example.profile": {Collection: "new.example.profile"},
+		"old.example.profile": {Collection: "old.example.profile"},
+	}}
+	service := NewService(
+		&fakeResolver{identity: identity},
+		reader,
+		Source{
+			Collection: "new.example.profile",
+			RecordKey:  "self",
+			Extract: func(Identity, json.RawMessage) (Summary, error) {
+				return Summary{
+					DisplayName: "New Alice",
+					CreatedAt:   "2025-01-02T03:04:05Z",
+				}, nil
+			},
+		},
+		Source{
+			Collection: "old.example.profile",
+			RecordKey:  "self",
+			Extract: func(Identity, json.RawMessage) (Summary, error) {
+				return Summary{
+					DisplayName: "Old Alice",
+					CreatedAt:   "2024-01-02T03:04:05Z",
+				}, nil
+			},
+		},
+	)
+
+	account, err := service.Lookup(context.Background(), "alice.example", nil)
+	require.NoError(t, err)
+	require.Equal(t, "old.example.profile", account.Default)
+	require.Equal(t, "Old Alice", account.DisplayName)
+	require.Len(t, account.Profiles, 2)
+}
+
+func TestServiceLookupBreaksCreatedAtTiesByCollection(t *testing.T) {
+	t.Parallel()
+
+	const createdAt = "2024-01-02T03:04:05Z"
+	identity := Identity{DID: "did:plc:alice", PDS: "https://pds.example"}
+	reader := &fakeReader{records: map[string]Record{
+		"z.example.profile": {Collection: "z.example.profile"},
+		"a.example.profile": {Collection: "a.example.profile"},
+	}}
+	service := NewService(
+		&fakeResolver{identity: identity},
+		reader,
+		Source{
+			Collection: "z.example.profile",
+			RecordKey:  "self",
+			Extract: func(Identity, json.RawMessage) (Summary, error) {
+				return Summary{CreatedAt: createdAt}, nil
+			},
+		},
+		Source{
+			Collection: "a.example.profile",
+			RecordKey:  "self",
+			Extract: func(Identity, json.RawMessage) (Summary, error) {
+				return Summary{CreatedAt: createdAt}, nil
+			},
+		},
+	)
+
+	account, err := service.Lookup(context.Background(), "alice.example", nil)
+	require.NoError(t, err)
+	require.Equal(t, "a.example.profile", account.Default)
+}
+
+func TestServiceLookupRejectsUnorderableProfiles(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		createdAt string
+	}{
+		{name: "missing createdAt"},
+		{name: "invalid createdAt", createdAt: "yesterday"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			identity := Identity{DID: "did:plc:alice", PDS: "https://pds.example"}
+			reader := &fakeReader{records: map[string]Record{
+				"valid.example.profile":   {Collection: "valid.example.profile"},
+				"invalid.example.profile": {Collection: "invalid.example.profile"},
+			}}
+			service := NewService(
+				&fakeResolver{identity: identity},
+				reader,
+				Source{
+					Collection: "valid.example.profile",
+					RecordKey:  "self",
+					Extract: func(Identity, json.RawMessage) (Summary, error) {
+						return Summary{CreatedAt: "2024-01-02T03:04:05Z"}, nil
+					},
+				},
+				Source{
+					Collection: "invalid.example.profile",
+					RecordKey:  "self",
+					Extract: func(Identity, json.RawMessage) (Summary, error) {
+						return Summary{CreatedAt: test.createdAt}, nil
+					},
+				},
+			)
+
+			_, err := service.Lookup(context.Background(), "alice.example", nil)
+			require.ErrorIs(t, err, ErrProfileCreatedAt)
+			require.ErrorContains(t, err, "invalid.example.profile")
+		})
+	}
 }
 
 func TestServiceLookupRejectsInvalidAppLink(t *testing.T) {
@@ -130,7 +250,6 @@ func TestServiceLookupRejectsInvalidAppLink(t *testing.T) {
 		&fakeReader{records: map[string]Record{
 			"app.example.profile": {Collection: "app.example.profile"},
 		}},
-		"app.example.profile",
 		Source{
 			Collection: "app.example.profile",
 			RecordKey:  "self",
@@ -159,14 +278,13 @@ func TestServiceLookupAllSkipsMissingRecords(t *testing.T) {
 		&fakeReader{records: map[string]Record{
 			"app.example.profile": {Collection: "app.example.profile"},
 		}},
-		"app.example.profile",
 		Source{Collection: "app.example.profile", RecordKey: "self"},
 		Source{Collection: "org.example.profile", RecordKey: "self"},
 	)
 
 	account, err := service.Lookup(context.Background(), "alice.example", nil)
 	require.NoError(t, err)
-	require.Equal(t, "app.example.profile", account.Authoritative)
+	require.Equal(t, "app.example.profile", account.Default)
 	require.Len(t, account.Profiles, 1)
 	require.Equal(t, "app.example.profile", account.Profiles[0].Collection)
 }
@@ -177,7 +295,6 @@ func TestNewServiceDeduplicatesSources(t *testing.T) {
 	service := NewService(
 		&fakeResolver{},
 		&fakeReader{},
-		"app.example.profile",
 		Source{Collection: "app.example.profile", RecordKey: "self"},
 		Source{Collection: "app.example.profile", RecordKey: "self"},
 		Source{Collection: "org.example.profile", RecordKey: "self"},
@@ -197,6 +314,7 @@ func TestBlueskyProfileSummary(t *testing.T) {
 		"$type":"app.bsky.actor.profile",
 		"displayName":"Alice",
 		"description":"Builder",
+		"createdAt":"2024-01-02T03:04:05.123Z",
 		"avatar":{
 			"$type":"blob",
 			"ref":{"$link":"bafycid"},
@@ -211,6 +329,7 @@ func TestBlueskyProfileSummary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Alice", summary.DisplayName)
 	require.Equal(t, "Builder", summary.Description)
+	require.Equal(t, "2024-01-02T03:04:05.123Z", summary.CreatedAt)
 	require.Equal(
 		t,
 		"https://pds.example/xrpc/com.atproto.sync.getBlob"+
@@ -240,7 +359,6 @@ func TestServiceAvatar(t *testing.T) {
 	service := NewService(
 		&fakeResolver{identity: Identity{DID: "did:plc:alice", PDS: "https://pds.example"}},
 		reader,
-		"app.example.profile",
 		Source{
 			Collection: "app.example.profile",
 			RecordKey:  "self",
@@ -274,7 +392,6 @@ func TestServiceLookupExposesAvatarContentType(t *testing.T) {
 				Value:      json.RawMessage(`{"avatar":true}`),
 			},
 		}},
-		"app.example.profile",
 		Source{
 			Collection: "app.example.profile",
 			RecordKey:  "self",
@@ -320,7 +437,6 @@ func TestServiceAvatarErrors(t *testing.T) {
 			service := NewService(
 				&fakeResolver{identity: Identity{DID: "did:plc:alice", PDS: "https://pds.example"}},
 				&fakeReader{records: test.records},
-				"app.example.profile",
 				Source{Collection: "app.example.profile", RecordKey: "self", Extract: test.extract},
 			)
 			_, err := service.Avatar(context.Background(), "alice.example")
@@ -368,7 +484,6 @@ func TestServiceLookupErrors(t *testing.T) {
 			service := NewService(
 				&fakeResolver{identity: test.identity},
 				&fakeReader{},
-				"app.example.profile",
 				Source{Collection: "app.example.profile", RecordKey: "self"},
 			)
 			_, err := service.Lookup(
@@ -393,7 +508,6 @@ func TestServiceLookupPropagatesReaderError(t *testing.T) {
 		&fakeReader{errors: map[string]error{
 			"app.example.profile": upstreamErr,
 		}},
-		"app.example.profile",
 		Source{Collection: "app.example.profile", RecordKey: "self"},
 	)
 

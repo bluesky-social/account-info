@@ -211,6 +211,7 @@ func extractBlueskyProfile(
 	summary := Summary{
 		DisplayName: record.DisplayName.ValOr(""),
 		Description: record.Description.ValOr(""),
+		CreatedAt:   record.CreatedAt.ValOr(""),
 	}
 	if record.Avatar.HasVal() {
 		blob := record.Avatar.Val()
@@ -266,7 +267,7 @@ func blobURL(pds, did, cid string) (string, error) {
 	return base.String(), nil
 }
 
-// NewDefaultService uses Bluesky profiles as the temporary authority policy.
+// NewDefaultService constructs a service with every known profile source.
 func NewDefaultService(cacheConfig CacheConfig) (*Service, error) {
 	if err := cacheConfig.validate(); err != nil {
 		return nil, err
@@ -286,7 +287,6 @@ func NewDefaultService(cacheConfig CacheConfig) (*Service, error) {
 	service := NewService(
 		resolver,
 		&atprotoRecordReader{httpClient: httpClient},
-		bsky.NSIDActorProfile,
 		Source{
 			Collection: bsky.NSIDActorProfile,
 			RecordKey:  profileRecordKey,

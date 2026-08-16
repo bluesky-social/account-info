@@ -27,14 +27,14 @@ type fakeAccountLookup struct {
 }
 
 type decodedAccountResponse struct {
-	DID           string                            `json:"did"`
-	Handle        string                            `json:"handle"`
-	PDS           string                            `json:"pds"`
-	Authoritative string                            `json:"authoritative"`
-	DisplayName   string                            `json:"displayName"`
-	Description   string                            `json:"description"`
-	Avatar        string                            `json:"avatar"`
-	Profiles      map[string]decodedProfileResponse `json:"profiles"`
+	DID         string                            `json:"did"`
+	Handle      string                            `json:"handle"`
+	PDS         string                            `json:"pds"`
+	Default     string                            `json:"default"`
+	DisplayName string                            `json:"displayName"`
+	Description string                            `json:"description"`
+	Avatar      string                            `json:"avatar"`
+	Profiles    map[string]decodedProfileResponse `json:"profiles"`
 }
 
 type decodedProfileResponse struct {
@@ -89,7 +89,7 @@ func TestAccountHandlerRedirectsPreferredImageRepresentation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			lookup := &fakeAccountLookup{account: testAccount(1)}
-			lookup.account.Authoritative = "app.bsky.actor.profile"
+			lookup.account.Default = "app.bsky.actor.profile"
 			response := requestAccountWithHeaders(
 				t,
 				lookup,
@@ -112,7 +112,7 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Default = "app.bsky.actor.profile"
 	lookup.account.DisplayName = "Alice Example"
 	lookup.account.Description = "Builder of reliable systems."
 	lookup.account.Avatar = "https://pds.example/xrpc/com.atproto.sync.getBlob?secret=upstream"
@@ -171,7 +171,7 @@ func TestAccountHandlerRendersHTMLForLinkPreviewCrawler(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(1)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Default = "app.bsky.actor.profile"
 	lookup.account.Avatar = "https://pds.example/xrpc/com.atproto.sync.getBlob"
 	lookup.account.AvatarContentType = "image/png"
 	response := requestAccountWithHeaders(
@@ -195,7 +195,7 @@ func TestAccountHandlerRendersWebPAvatar(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(1)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Default = "app.bsky.actor.profile"
 	lookup.account.Avatar = "https://pds.example/xrpc/com.atproto.sync.getBlob"
 	lookup.account.AvatarContentType = "image/webp"
 	response := requestAccountWithHeaders(
@@ -217,7 +217,7 @@ func TestAccountHandlerRendersWebPAvatar(t *testing.T) {
 	)
 }
 
-func TestAccountHandlerRendersAllProfilesWithoutAuthority(t *testing.T) {
+func TestAccountHandlerMarksDefaultProfile(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
@@ -230,7 +230,7 @@ func TestAccountHandlerRendersAllProfilesWithoutAuthority(t *testing.T) {
 	)
 
 	require.Equal(t, http.StatusOK, response.Code)
-	require.Contains(t, response.Body.String(), "No authoritative profile is available")
+	require.Contains(t, response.Body.String(), "Default")
 	require.Contains(t, response.Body.String(), "app.bsky.actor.profile")
 	require.Contains(t, response.Body.String(), "org.example.profile")
 }
@@ -345,7 +345,7 @@ func TestAccountHandlerExplicitJSONPreservesPayloadForBrowser(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Default = "app.bsky.actor.profile"
 	lookup.account.Profiles[0].App = &profile.AppLink{
 		Name: "Bluesky",
 		Icon: "bluesky",
@@ -387,7 +387,7 @@ func TestAccountLandingPageEscapesUpstreamContent(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(1)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Default = "app.bsky.actor.profile"
 	lookup.account.DisplayName = `<script>alert("display name")</script>`
 	lookup.account.Description = `<img src=x onerror=alert("description")>`
 	lookup.account.Profiles[0].Value = json.RawMessage(
@@ -413,7 +413,7 @@ func TestAccountLandingPageRejectsDuplicateProfileCollections(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Default = "app.bsky.actor.profile"
 	lookup.account.Profiles[1].Collection = "app.bsky.actor.profile"
 	response := requestAccountWithHeaders(
 		t,
@@ -573,7 +573,7 @@ func TestAvatarHandlerErrors(t *testing.T) {
 	}{
 		{name: "profile missing", err: profile.ErrProfileNotFound, status: http.StatusNotFound, code: "profile_not_found"},
 		{name: "avatar missing", err: profile.ErrAvatarNotFound, status: http.StatusNotFound, code: "avatar_not_found"},
-		{name: "ambiguous profile", err: profile.ErrMultipleProfiles, status: http.StatusConflict, code: "multiple_profiles"},
+		{name: "profile age unknown", err: profile.ErrProfileCreatedAt, status: http.StatusConflict, code: "profile_age_unknown"},
 		{name: "upstream failure", err: errors.New("blob failed"), status: http.StatusBadGateway, code: "upstream_error"},
 	}
 
@@ -594,11 +594,11 @@ func TestAvatarHandlerErrors(t *testing.T) {
 	}
 }
 
-func TestAccountHandlerReturnsAuthoritativeProfileAndAllRecords(t *testing.T) {
+func TestAccountHandlerReturnsDefaultProfileAndAllRecords(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Default = "app.bsky.actor.profile"
 	lookup.account.DisplayName = "Alice"
 	lookup.account.Description = "Builder"
 	lookup.account.Avatar = "https://pds.example/xrpc/com.atproto.sync.getBlob"
@@ -609,7 +609,7 @@ func TestAccountHandlerReturnsAuthoritativeProfileAndAllRecords(t *testing.T) {
 	var body decodedAccountResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Equal(t, lookup.account.DID, body.DID)
-	require.Equal(t, "app.bsky.actor.profile", body.Authoritative)
+	require.Equal(t, "app.bsky.actor.profile", body.Default)
 	require.Equal(t, "Alice", body.DisplayName)
 	require.Equal(t, "Builder", body.Description)
 	require.Equal(
@@ -632,7 +632,7 @@ func TestAccountHandlerReturnsAuthoritativeProfileAndAllRecords(t *testing.T) {
 	require.NotContains(t, raw.Profiles["app.bsky.actor.profile"], "collection")
 }
 
-func TestAccountHandlerReturnsAllProfilesWithoutAuthority(t *testing.T) {
+func TestAccountHandlerReturnsAllProfilesWithDefault(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
@@ -641,7 +641,7 @@ func TestAccountHandlerReturnsAllProfilesWithoutAuthority(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code)
 	var body decodedAccountResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
-	require.Empty(t, body.Authoritative)
+	require.Equal(t, "app.bsky.actor.profile", body.Default)
 	require.Equal(
 		t,
 		map[string]decodedProfileResponse{
@@ -656,7 +656,7 @@ func TestAccountHandlerIgnoresRemovedAllParameter(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Default = "app.bsky.actor.profile"
 	response := requestAccount(t, lookup, "/alice.example?all=sometimes")
 
 	require.Equal(t, http.StatusOK, response.Code)
@@ -691,8 +691,21 @@ func TestAccountHandlerRejectsDuplicateProfileCollections(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Default = "app.bsky.actor.profile"
 	lookup.account.Profiles[1].Collection = "app.bsky.actor.profile"
+	response := requestAccount(t, lookup, "/alice.example")
+
+	require.Equal(t, http.StatusInternalServerError, response.Code)
+	var body errorResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Equal(t, "internal_error", body.Error)
+}
+
+func TestAccountHandlerRejectsMissingDefaultProfile(t *testing.T) {
+	t.Parallel()
+
+	lookup := &fakeAccountLookup{account: testAccount(2)}
+	lookup.account.Default = ""
 	response := requestAccount(t, lookup, "/alice.example")
 
 	require.Equal(t, http.StatusInternalServerError, response.Code)
@@ -777,7 +790,7 @@ func TestWriteJSONEncodeFailureReturnsInternalError(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(1)}
-	lookup.account.Authoritative = "app.bsky.actor.profile"
+	lookup.account.Default = "app.bsky.actor.profile"
 	lookup.account.Profiles[0].Value = json.RawMessage(`{invalid`)
 	response := requestAccount(t, lookup, "/alice.example")
 
@@ -835,6 +848,9 @@ func testAccount(profileCount int) profile.Account {
 		Handle:   "alice.example",
 		PDS:      "https://pds.example",
 		Profiles: make([]profile.Record, 0, profileCount),
+	}
+	if profileCount > 0 {
+		account.Default = "app.bsky.actor.profile"
 	}
 	collections := []string{
 		"app.bsky.actor.profile",

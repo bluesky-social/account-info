@@ -59,7 +59,6 @@
 
       <section aria-labelledby="profiles-title">
         <h2 id="profiles-title">Profile records</h2>
-        {{if not .HasDefault}}<p class="small">No authoritative profile is available; all discovered profile records are shown without selecting a default.</p>{{end}}
         <div class="profile-list">
           {{range .Profiles}}
           <article class="profile-card">

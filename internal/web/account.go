@@ -32,14 +32,14 @@ type errorResponse struct {
 }
 
 type accountResponse struct {
-	DID           string                           `json:"did"`
-	Handle        string                           `json:"handle,omitempty"`
-	PDS           string                           `json:"pds"`
-	Authoritative string                           `json:"authoritative,omitempty"`
-	DisplayName   string                           `json:"displayName,omitempty"`
-	Description   string                           `json:"description,omitempty"`
-	Avatar        string                           `json:"avatar,omitempty"`
-	Profiles      map[string]profileRecordResponse `json:"profiles"`
+	DID         string                           `json:"did"`
+	Handle      string                           `json:"handle,omitempty"`
+	PDS         string                           `json:"pds"`
+	Default     string                           `json:"default,omitempty"`
+	DisplayName string                           `json:"displayName,omitempty"`
+	Description string                           `json:"description,omitempty"`
+	Avatar      string                           `json:"avatar,omitempty"`
+	Profiles    map[string]profileRecordResponse `json:"profiles"`
 }
 
 type profileRecordResponse struct {
@@ -240,10 +240,10 @@ func classifyLookupFailure(err error, collections []string) lookupFailure {
 			message:     err.Error(),
 			htmlMessage: "That account does not have an avatar.",
 		}
-	case errors.Is(err, profile.ErrMultipleProfiles):
+	case errors.Is(err, profile.ErrProfileCreatedAt):
 		return lookupFailure{
 			status:      http.StatusConflict,
-			code:        "multiple_profiles",
+			code:        "profile_age_unknown",
 			message:     err.Error(),
 			htmlMessage: "A default profile could not be selected for that account.",
 		}
@@ -331,16 +331,25 @@ func newAccountResponse(account *profile.Account) (accountResponse, error) {
 			Value: record.Value,
 		}
 	}
+	if account.Default == "" {
+		return accountResponse{}, fmt.Errorf("default profile collection is empty")
+	}
+	if _, exists := profiles[account.Default]; !exists {
+		return accountResponse{}, fmt.Errorf(
+			"default profile collection is missing: %s",
+			account.Default,
+		)
+	}
 
 	return accountResponse{
-		DID:           account.DID,
-		Handle:        account.Handle,
-		PDS:           account.PDS,
-		Authoritative: account.Authoritative,
-		DisplayName:   account.DisplayName,
-		Description:   account.Description,
-		Avatar:        account.Avatar,
-		Profiles:      profiles,
+		DID:         account.DID,
+		Handle:      account.Handle,
+		PDS:         account.PDS,
+		Default:     account.Default,
+		DisplayName: account.DisplayName,
+		Description: account.Description,
+		Avatar:      account.Avatar,
+		Profiles:    profiles,
 	}, nil
 }
 
