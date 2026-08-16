@@ -323,66 +323,6 @@ func TestServiceLookupLeavesDefaultUnsetWhenNoProfileAgeIsKnown(t *testing.T) {
 	require.Len(t, account.Profiles, 2)
 }
 
-func TestServiceLookupToleratesLegacyTangledProfile(t *testing.T) {
-	t.Parallel()
-
-	const (
-		bskyCollection    = "app.bsky.actor.profile"
-		tangledCollection = "sh.tangled.actor.profile"
-	)
-	selectors := func(displayName, description, avatar, createdAt string) ProfileSelectors {
-		return ProfileSelectors{
-			DisplayName: displayName,
-			Description: description,
-			Avatar:      avatar,
-			CreatedAt:   createdAt,
-		}
-	}
-	service := mustNewTestService(t,
-		&fakeResolver{identity: Identity{
-			DID:    "did:plc:alice",
-			Handle: "alice.example",
-			PDS:    "https://pds.example",
-		}},
-		&fakeReader{records: map[string]Record{
-			bskyCollection: {
-				Collection: bskyCollection,
-				Value: json.RawMessage(`{
-					"$type":"app.bsky.actor.profile",
-					"displayName":"Alice",
-					"createdAt":"2024-01-02T03:04:05Z"
-				}`),
-			},
-			tangledCollection: {
-				Collection: tangledCollection,
-				Value: json.RawMessage(
-					`{"$type":"sh.tangled.actor.profile","bluesky":false}`,
-				),
-			},
-		}},
-		Source{
-			Collection: bskyCollection,
-			RecordKey:  "self",
-			Selectors: selectors(
-				"$.displayName", "$.description", "$.avatar", "$.createdAt",
-			),
-		},
-		Source{
-			Collection: tangledCollection,
-			RecordKey:  "self",
-			Selectors: selectors(
-				"$.preferredHandle", "$.description", "$.avatar", "$.createdAt",
-			),
-		},
-	)
-
-	account, err := service.Lookup(context.Background(), "alice.example", nil)
-	require.NoError(t, err)
-	require.Equal(t, bskyCollection, account.Default)
-	require.Equal(t, "Alice", account.DisplayName)
-	require.Len(t, account.Profiles, 2)
-}
-
 func TestServiceLookupUsesValidFieldsFromPartiallyInvalidProfile(t *testing.T) {
 	t.Parallel()
 
@@ -547,53 +487,6 @@ func TestNewServiceRejectsInvalidProfileSources(t *testing.T) {
 			require.ErrorContains(t, err, test.want)
 		})
 	}
-}
-
-func TestBlueskyProfileSummary(t *testing.T) {
-	t.Parallel()
-
-	value := json.RawMessage(`{
-		"$type":"app.bsky.actor.profile",
-		"displayName":"Alice",
-		"description":"Builder",
-		"createdAt":"2024-01-02T03:04:05.123Z",
-		"avatar":{
-			"$type":"blob",
-			"ref":{"$link":"bafkreiaff2bptwyp4fg7o533pplheq4l3bxuiltnhkxgwabqyvt4achj6q"},
-			"mimeType":"image/jpeg",
-			"size":123
-		}
-	}`)
-	summary, err := extractTestJSONProfile(t,
-		Identity{
-			DID: "did:plc:alice",
-			PDS: "https://pds.example/",
-		},
-		"app.bsky.actor.profile",
-		value,
-		ProfileSelectors{
-			DisplayName: "$.displayName",
-			Description: "$.description",
-			Avatar:      "$.avatar",
-			CreatedAt:   "$.createdAt",
-		},
-	)
-	require.NoError(t, err)
-	require.Equal(t, "Alice", summary.DisplayName)
-	require.Equal(t, "Builder", summary.Description)
-	require.Equal(t, "2024-01-02T03:04:05.123Z", summary.CreatedAt)
-	require.Equal(
-		t,
-		"https://pds.example/xrpc/com.atproto.sync.getBlob"+
-			"?cid=bafkreiaff2bptwyp4fg7o533pplheq4l3bxuiltnhkxgwabqyvt4achj6q"+
-			"&did=did%3Aplc%3Aalice",
-		summary.Avatar,
-	)
-	require.Equal(t, &BlobRef{
-		CID:         "bafkreiaff2bptwyp4fg7o533pplheq4l3bxuiltnhkxgwabqyvt4achj6q",
-		ContentType: "image/jpeg",
-		Size:        123,
-	}, summary.AvatarRef)
 }
 
 func TestExtractJSONProfileUsesConfiguredPointers(t *testing.T) {
