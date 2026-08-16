@@ -80,6 +80,22 @@ func TestEmbeddedProfileSources(t *testing.T) {
 	profileURL, err = spark.App.ProfileURL(Identity{Handle: "joebasser.com"})
 	require.NoError(t, err)
 	require.Equal(t, "https://sprk.so/profile/joebasser.com", profileURL)
+
+	sifa := requireProfileSource(t, sources, "id.sifa.profile.self")
+	require.Equal(t, "id.sifa.profile.self", sifa.Collection)
+	require.Equal(t, "self", sifa.RecordKey)
+	require.Equal(t, ProfileSelectors{
+		DisplayName: "$.displayName",
+		Description: "$.about",
+		Avatar:      "$.avatar",
+		CreatedAt:   "$.createdAt",
+	}, sifa.Selectors)
+	require.NotNil(t, sifa.App)
+	require.Equal(t, "Sifa ID", sifa.App.Name)
+	require.Equal(t, "https://sifa.id/apple-icon.png", sifa.App.IconURL)
+	profileURL, err = sifa.App.ProfileURL(Identity{Handle: "knotbin.com"})
+	require.NoError(t, err)
+	require.Equal(t, "https://sifa.id/p/knotbin.com", profileURL)
 }
 
 func TestTangledProfileExtraction(t *testing.T) {
@@ -208,6 +224,56 @@ func TestSparkProfileExtraction(t *testing.T) {
 	require.Equal(
 		t,
 		"https://suillus.us-west.host.bsky.network/xrpc/com.atproto.sync.getBlob?cid=bafkreichh65megb3qxl5rxghb7ruxfw4tunnjymyaapl5vubmulxxuaxby&did=did%3Aplc%3Aqed67d2sst5xqsbuveiv7fjp",
+		summary.Avatar,
+	)
+}
+
+func TestSifaProfileExtraction(t *testing.T) {
+	t.Parallel()
+
+	sources, err := parseProfileSources(accountinfo.ProfilesJSON())
+	require.NoError(t, err)
+	sifa := requireProfileSource(t, sources, "id.sifa.profile.self")
+	value := []byte(`{
+		"$type":"id.sifa.profile.self",
+		"about":"16 year old software engineer. Co-founder and CTO of Spark Social.",
+		"avatar":{
+			"ref":{"$link":"bafkreicnui2gniokq72ukyolei3tfkp2lw6hvisfoj6fwqpebhu5knp35y"},
+			"size":18745,
+			"$type":"blob",
+			"mimeType":"image/jpeg"
+		},
+		"openTo":[],
+		"headline":"AT Protocol full-stack engineer",
+		"createdAt":"2026-03-22T18:47:21.326Z",
+		"preferredWorkplace":[]
+	}`)
+
+	summary, err := extractJSONProfile(
+		Identity{
+			DID: "did:plc:6hbqm2oftpotwuw7gvvrui3i",
+			PDS: "https://knotbin.xyz",
+		},
+		sifa.Collection,
+		value,
+		sifa.compiledSelectors,
+	)
+	require.NoError(t, err)
+	require.Empty(t, summary.DisplayName)
+	require.Equal(
+		t,
+		"16 year old software engineer. Co-founder and CTO of Spark Social.",
+		summary.Description,
+	)
+	require.Equal(t, "2026-03-22T18:47:21.326Z", summary.CreatedAt)
+	require.Equal(t, &BlobRef{
+		CID:         "bafkreicnui2gniokq72ukyolei3tfkp2lw6hvisfoj6fwqpebhu5knp35y",
+		ContentType: "image/jpeg",
+		Size:        18745,
+	}, summary.AvatarRef)
+	require.Equal(
+		t,
+		"https://knotbin.xyz/xrpc/com.atproto.sync.getBlob?cid=bafkreicnui2gniokq72ukyolei3tfkp2lw6hvisfoj6fwqpebhu5knp35y&did=did%3Aplc%3A6hbqm2oftpotwuw7gvvrui3i",
 		summary.Avatar,
 	)
 }

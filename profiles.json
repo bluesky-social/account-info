@@ -60,6 +60,21 @@
         "iconURL": "https://sprk.so/meta/apple-touch-icon.png",
         "profileURL": "https://sprk.so/profile/{identifier}"
       }
+    },
+    {
+      "collection": "id.sifa.profile.self",
+      "recordKey": "self",
+      "selectors": {
+        "displayName": "$.displayName",
+        "description": "$.about",
+        "avatar": "$.avatar",
+        "createdAt": "$.createdAt"
+      },
+      "app": {
+        "name": "Sifa ID",
+        "iconURL": "https://sifa.id/apple-icon.png",
+        "profileURL": "https://sifa.id/p/{identifier}"
+      }
     }
   ]
 }
