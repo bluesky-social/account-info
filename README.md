@@ -46,8 +46,7 @@ the oldest profile with a valid `createdAt`; if none has a usable timestamp,
 An entry may also define application-link metadata. Its `profileURL` must be an
 HTTPS URL containing one `{identifier}` placeholder in the path. Its `iconURL`
 must be an HTTPS URL whose path ends in `.svg`, `.png`, `.jpg`, or `.jpeg`.
-Discovered application links appear as an icon row on the public profile page;
-icons are loaded remotely and are not stored in this repository.
+Discovered application links appear as an icon row on the public profile page.
 
 ## Avatars
 
