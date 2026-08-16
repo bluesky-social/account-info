@@ -30,6 +30,21 @@
         "iconURL": "https://tangled.org/static/logos/dolly.svg",
         "profileURL": "https://tangled.org/{identifier}"
       }
+    },
+    {
+      "collection": "social.grain.actor.profile",
+      "recordKey": "self",
+      "selectors": {
+        "displayName": "$.displayName",
+        "description": "$.description",
+        "avatar": "$.avatar",
+        "createdAt": "$.createdAt"
+      },
+      "app": {
+        "name": "Grain",
+        "iconURL": "https://grain.social/icon-192.png",
+        "profileURL": "https://grain.social/profile/{identifier}"
+      }
     }
   ]
 }

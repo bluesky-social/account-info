@@ -48,6 +48,22 @@ func TestEmbeddedProfileSources(t *testing.T) {
 	profileURL, err = tangled.App.ProfileURL(Identity{Handle: "anirudh.fi"})
 	require.NoError(t, err)
 	require.Equal(t, "https://tangled.org/anirudh.fi", profileURL)
+
+	grain := requireProfileSource(t, sources, "social.grain.actor.profile")
+	require.Equal(t, "social.grain.actor.profile", grain.Collection)
+	require.Equal(t, "self", grain.RecordKey)
+	require.Equal(t, ProfileSelectors{
+		DisplayName: "$.displayName",
+		Description: "$.description",
+		Avatar:      "$.avatar",
+		CreatedAt:   "$.createdAt",
+	}, grain.Selectors)
+	require.NotNil(t, grain.App)
+	require.Equal(t, "Grain", grain.App.Name)
+	require.Equal(t, "https://grain.social/icon-192.png", grain.App.IconURL)
+	profileURL, err = grain.App.ProfileURL(Identity{Handle: "joebasser.com"})
+	require.NoError(t, err)
+	require.Equal(t, "https://grain.social/profile/joebasser.com", profileURL)
 }
 
 func TestTangledProfileExtraction(t *testing.T) {
@@ -55,7 +71,6 @@ func TestTangledProfileExtraction(t *testing.T) {
 
 	sources, err := parseProfileSources(accountinfo.ProfilesJSON())
 	require.NoError(t, err)
-	require.Len(t, sources, 2)
 	tangled := requireProfileSource(t, sources, "sh.tangled.actor.profile")
 	value := []byte(`{
 		"$type":"sh.tangled.actor.profile",
@@ -93,6 +108,49 @@ func TestTangledProfileExtraction(t *testing.T) {
 		ContentType: "image/png",
 		Size:        678939,
 	}, summary.AvatarRef)
+}
+
+func TestGrainProfileExtraction(t *testing.T) {
+	t.Parallel()
+
+	sources, err := parseProfileSources(accountinfo.ProfilesJSON())
+	require.NoError(t, err)
+	grain := requireProfileSource(t, sources, "social.grain.actor.profile")
+	value := []byte(`{
+		"$type":"social.grain.actor.profile",
+		"avatar":{
+			"ref":{"$link":"bafkreicf4fsbv5eb4vyfxha55m5gnz6pp4ccfocsucyc2gvzeazpwfxhkm"},
+			"size":993453,
+			"$type":"blob",
+			"mimeType":"image/jpeg"
+		},
+		"createdAt":"2026-04-07T15:04:15.903Z",
+		"displayName":"Joe Basser"
+	}`)
+
+	summary, err := extractJSONProfile(
+		Identity{
+			DID: "did:plc:qed67d2sst5xqsbuveiv7fjp",
+			PDS: "https://suillus.us-west.host.bsky.network",
+		},
+		grain.Collection,
+		value,
+		grain.compiledSelectors,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "Joe Basser", summary.DisplayName)
+	require.Empty(t, summary.Description)
+	require.Equal(t, "2026-04-07T15:04:15.903Z", summary.CreatedAt)
+	require.Equal(t, &BlobRef{
+		CID:         "bafkreicf4fsbv5eb4vyfxha55m5gnz6pp4ccfocsucyc2gvzeazpwfxhkm",
+		ContentType: "image/jpeg",
+		Size:        993453,
+	}, summary.AvatarRef)
+	require.Equal(
+		t,
+		"https://suillus.us-west.host.bsky.network/xrpc/com.atproto.sync.getBlob?cid=bafkreicf4fsbv5eb4vyfxha55m5gnz6pp4ccfocsucyc2gvzeazpwfxhkm&did=did%3Aplc%3Aqed67d2sst5xqsbuveiv7fjp",
+		summary.Avatar,
+	)
 }
 
 func TestParseRemoteIconURL(t *testing.T) {
