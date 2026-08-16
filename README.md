@@ -8,14 +8,14 @@ Open an account by handle or DID in a browser to see its default profile and
 every other supported profile record on a small landing page:
 
 ```text
-https://account.info/calabro.io
+https://account.info/bsky.app
 ```
 
 API clients receive the default profile and every other supported profile
 record as JSON:
 
 ```console
-curl https://account.info/calabro.io
+curl https://account.info/bsky.app
 ```
 
 The account endpoint negotiates between HTML, JSON, and image responses using
@@ -25,8 +25,8 @@ while API clients such as curl, Go, Python, and Node receive JSON. Callers can
 always select a representation explicitly:
 
 ```console
-curl -H 'Accept: application/json' https://account.info/calabro.io
-curl -H 'Accept: text/html' https://account.info/calabro.io
+curl -H 'Accept: application/json' https://account.info/bsky.app
+curl -H 'Accept: text/html' https://account.info/bsky.app
 ```
 
 ## Avatars
@@ -34,7 +34,7 @@ curl -H 'Accept: text/html' https://account.info/calabro.io
 The canonical avatar endpoint serves the profile's original JPEG or PNG:
 
 ```console
-curl -o avatar https://account.info/avatar/calabro.io
+curl -o avatar https://account.info/avatar/bsky.app
 ```
 
 The account endpoint also negotiates an image representation. It redirects to
@@ -42,7 +42,7 @@ the canonical avatar endpoint so CDNs store the image under one URL instead of
 fragmenting the image cache by the exact `Accept` header:
 
 ```console
-curl -L -H 'Accept: image/*' https://account.info/calabro.io -o avatar
+curl -L -H 'Accept: image/*' https://account.info/bsky.app -o avatar
 ```
 
 Avatar responses include a strong ETag derived from the blob CID and are
