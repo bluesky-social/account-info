@@ -46,11 +46,6 @@ func TestAccountCacheKeysCollectionsAndClonesValues(t *testing.T) {
 		Profiles: []Record{{
 			Collection: "app.example.profile",
 			Value:      []byte(`{"name":"Alice"}`),
-			App: &AppLink{
-				Name: "Example",
-				Icon: "example",
-				URL:  "https://app.example/alice",
-			},
 		}},
 		avatarRef: &BlobRef{CID: "bafycid", Size: 123},
 	}
@@ -71,7 +66,6 @@ func TestAccountCacheKeysCollectionsAndClonesValues(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, err)
 	got.Profiles[0].Value[0] = 'x'
-	got.Profiles[0].App.URL = "https://attacker.example/"
 	got.avatarRef.Size = 456
 
 	again, err, ok := cache.get(

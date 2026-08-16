@@ -9,11 +9,16 @@
         "description": "$.description",
         "avatar": "$.avatar",
         "createdAt": "$.createdAt"
-      },
-      "app": {
-        "name": "Bluesky",
-        "icon": "bluesky",
-        "profileURL": "https://bsky.app/profile/{identifier}"
+      }
+    },
+    {
+      "collection": "sh.tangled.actor.profile",
+      "recordKey": "self",
+      "selectors": {
+        "displayName": "$.preferredHandle",
+        "description": "$.description",
+        "avatar": "$.avatar",
+        "createdAt": "$.createdAt"
       }
     }
   ]

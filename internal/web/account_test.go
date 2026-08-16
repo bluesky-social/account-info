@@ -118,11 +118,6 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	lookup.account.Avatar = "https://pds.example/xrpc/com.atproto.sync.getBlob?secret=upstream"
 	lookup.account.AvatarContentType = "image/jpeg"
 	lookup.account.Profiles[0].CID = "bafydefault"
-	lookup.account.Profiles[0].App = &profile.AppLink{
-		Name: "Bluesky",
-		Icon: "bluesky",
-		URL:  "https://bsky.app/profile/alice.example",
-	}
 	lookup.account.Profiles[1].CID = "bafyother"
 	response := requestAccountWithHeaders(
 		t,
@@ -136,7 +131,11 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	require.Equal(t, "text/html; charset=utf-8", response.Header().Get("Content-Type"))
 	require.Equal(t, "Accept, User-Agent", response.Header().Get("Vary"))
 	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
-	require.Contains(t, response.Header().Get("Content-Security-Policy"), "img-src 'self'")
+	require.Contains(
+		t,
+		response.Header().Get("Content-Security-Policy"),
+		"img-src 'self'",
+	)
 
 	body := response.Body.String()
 	require.Contains(t, body, "<title>Alice Example (@alice.example) — account.info</title>")
@@ -154,16 +153,15 @@ func TestAccountHandlerRendersBrowserLandingPage(t *testing.T) {
 	require.Contains(t, body, `<link rel="image_src" href="https://account.info/avatar/alice.example/profile.jpg">`)
 	require.Contains(t, body, "Alice Example")
 	require.Contains(t, body, "Builder of reliable systems.")
-	require.Contains(t, body, "did:plc:alice")
-	require.Contains(t, body, "app.bsky.actor.profile")
-	require.Contains(t, body, "org.example.profile")
-	require.Contains(t, body, "bafydefault")
-	require.Contains(t, body, "bafyother")
 	require.Contains(t, body, `src="/avatar/alice.example/profile.jpg"`)
-	require.Contains(t, body, `href="https://bsky.app/profile/alice.example"`)
-	require.Contains(t, body, `src="/assets/apps/bluesky.svg"`)
-	require.Contains(t, body, `aria-label="Open @alice.example on Bluesky"`)
-	require.Contains(t, body, `target="_blank"`)
+	require.NotContains(t, body, `id="identity-title"`)
+	require.NotContains(t, body, "did:plc:alice")
+	require.NotContains(t, body, "https://pds.example")
+	require.NotContains(t, body, "Profile records")
+	require.NotContains(t, body, "app.bsky.actor.profile")
+	require.NotContains(t, body, "org.example.profile")
+	require.NotContains(t, body, "bafydefault")
+	require.NotContains(t, body, "bafyother")
 	require.NotContains(t, body, "secret=upstream")
 }
 
@@ -215,24 +213,6 @@ func TestAccountHandlerRendersWebPAvatar(t *testing.T) {
 		body,
 		`<meta property="og:image:type" content="image/webp">`,
 	)
-}
-
-func TestAccountHandlerMarksDefaultProfile(t *testing.T) {
-	t.Parallel()
-
-	lookup := &fakeAccountLookup{account: testAccount(2)}
-	response := requestAccountWithHeaders(
-		t,
-		lookup,
-		"/alice.example",
-		"text/html",
-		"curl/8.14.1",
-	)
-
-	require.Equal(t, http.StatusOK, response.Code)
-	require.Contains(t, response.Body.String(), "Default")
-	require.Contains(t, response.Body.String(), "app.bsky.actor.profile")
-	require.Contains(t, response.Body.String(), "org.example.profile")
 }
 
 func TestAccountHandlerRendersLookupErrorsOnLookupPageForBrowser(t *testing.T) {
@@ -346,11 +326,6 @@ func TestAccountHandlerExplicitJSONPreservesPayloadForBrowser(t *testing.T) {
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
 	lookup.account.Default = "app.bsky.actor.profile"
-	lookup.account.Profiles[0].App = &profile.AppLink{
-		Name: "Bluesky",
-		Icon: "bluesky",
-		URL:  "https://bsky.app/profile/alice.example",
-	}
 	response := requestAccountWithHeaders(
 		t,
 		lookup,
@@ -409,7 +384,7 @@ func TestAccountLandingPageEscapesUpstreamContent(t *testing.T) {
 	require.Contains(t, body, "&lt;script&gt;")
 }
 
-func TestAccountLandingPageRejectsDuplicateProfileCollections(t *testing.T) {
+func TestAccountLandingPageDoesNotRenderProfileRecords(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
@@ -423,10 +398,8 @@ func TestAccountLandingPageRejectsDuplicateProfileCollections(t *testing.T) {
 		"Mozilla/5.0 Firefox/141.0",
 	)
 
-	require.Equal(t, http.StatusInternalServerError, response.Code)
-	var body errorResponse
-	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
-	require.Equal(t, "internal_error", body.Error)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.NotContains(t, response.Body.String(), "app.bsky.actor.profile")
 }
 
 func TestAvatarHandlerServesCacheableImage(t *testing.T) {
@@ -573,7 +546,6 @@ func TestAvatarHandlerErrors(t *testing.T) {
 	}{
 		{name: "profile missing", err: profile.ErrProfileNotFound, status: http.StatusNotFound, code: "profile_not_found"},
 		{name: "avatar missing", err: profile.ErrAvatarNotFound, status: http.StatusNotFound, code: "avatar_not_found"},
-		{name: "profile age unknown", err: profile.ErrProfileCreatedAt, status: http.StatusConflict, code: "profile_age_unknown"},
 		{name: "upstream failure", err: errors.New("blob failed"), status: http.StatusBadGateway, code: "upstream_error"},
 	}
 
@@ -701,17 +673,18 @@ func TestAccountHandlerRejectsDuplicateProfileCollections(t *testing.T) {
 	require.Equal(t, "internal_error", body.Error)
 }
 
-func TestAccountHandlerRejectsMissingDefaultProfile(t *testing.T) {
+func TestAccountHandlerReturnsProfilesWhenDefaultIsUnknown(t *testing.T) {
 	t.Parallel()
 
 	lookup := &fakeAccountLookup{account: testAccount(2)}
 	lookup.account.Default = ""
 	response := requestAccount(t, lookup, "/alice.example")
 
-	require.Equal(t, http.StatusInternalServerError, response.Code)
-	var body errorResponse
+	require.Equal(t, http.StatusOK, response.Code)
+	var body decodedAccountResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
-	require.Equal(t, "internal_error", body.Error)
+	require.Empty(t, body.Default)
+	require.Len(t, body.Profiles, 2)
 }
 
 func TestAccountHandlerErrors(t *testing.T) {

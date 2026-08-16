@@ -12,9 +12,8 @@ func TestEmbeddedProfileSources(t *testing.T) {
 
 	sources, err := parseProfileSources(accountinfo.ProfilesJSON())
 	require.NoError(t, err)
-	require.Len(t, sources, 1)
 
-	source := sources[0]
+	source := requireProfileSource(t, sources, "app.bsky.actor.profile")
 	require.Equal(t, "app.bsky.actor.profile", source.Collection)
 	require.Equal(t, "self", source.RecordKey)
 	require.Equal(t, ProfileSelectors{
@@ -23,37 +22,76 @@ func TestEmbeddedProfileSources(t *testing.T) {
 		Avatar:      "$.avatar",
 		CreatedAt:   "$.createdAt",
 	}, source.Selectors)
-	require.NotNil(t, source.App)
-	require.Equal(t, "Bluesky", source.App.Name)
-	require.Equal(t, "bluesky", source.App.Icon)
 
-	tests := []struct {
-		name     string
-		identity Identity
-		want     string
-	}{
-		{
-			name: "handle",
-			identity: Identity{
-				DID:    "did:plc:alice",
-				Handle: "alice.example",
-			},
-			want: "https://bsky.app/profile/alice.example",
+	tangled := requireProfileSource(t, sources, "sh.tangled.actor.profile")
+	require.Equal(t, "sh.tangled.actor.profile", tangled.Collection)
+	require.Equal(t, "self", tangled.RecordKey)
+	require.Equal(t, ProfileSelectors{
+		DisplayName: "$.preferredHandle",
+		Description: "$.description",
+		Avatar:      "$.avatar",
+		CreatedAt:   "$.createdAt",
+	}, tangled.Selectors)
+}
+
+func TestTangledProfileExtraction(t *testing.T) {
+	t.Parallel()
+
+	sources, err := parseProfileSources(accountinfo.ProfilesJSON())
+	require.NoError(t, err)
+	require.Len(t, sources, 2)
+	tangled := requireProfileSource(t, sources, "sh.tangled.actor.profile")
+	value := []byte(`{
+		"$type":"sh.tangled.actor.profile",
+		"links":["https://anirudh.fi"],
+		"stats":["",""],
+		"avatar":{
+			"ref":{"$link":"bafkreienfd6ne74ns5trr3cbwtkt6niyxg6zg75xwwajswsml3o2evjrbq"},
+			"size":678939,
+			"$type":"blob",
+			"mimeType":"image/png"
 		},
-		{
-			name:     "DID fallback",
-			identity: Identity{DID: "did:plc:alice"},
-			want:     "https://bsky.app/profile/did:plc:alice",
+		"bluesky":true,
+		"location":"Helsinki",
+		"pronouns":"he/him",
+		"createdAt":"2026-07-07T17:01:14.085767Z",
+		"description":"co-founder/ceo of this thing",
+		"pinnedRepositories":["did:plc:j5hmlfdrwkvtxm7cjmu7j2is"]
+	}`)
+
+	summary, err := extractJSONProfile(
+		Identity{
+			DID: "did:plc:hwevmowznbiukdf6uk5dwrrq",
+			PDS: "https://eurosky.social",
 		},
+		tangled.Collection,
+		value,
+		tangled.compiledSelectors,
+	)
+	require.NoError(t, err)
+	require.Empty(t, summary.DisplayName)
+	require.Equal(t, "co-founder/ceo of this thing", summary.Description)
+	require.Equal(t, "2026-07-07T17:01:14.085767Z", summary.CreatedAt)
+	require.Equal(t, &BlobRef{
+		CID:         "bafkreienfd6ne74ns5trr3cbwtkt6niyxg6zg75xwwajswsml3o2evjrbq",
+		ContentType: "image/png",
+		Size:        678939,
+	}, summary.AvatarRef)
+}
+
+func requireProfileSource(
+	t testing.TB,
+	sources []Source,
+	collection string,
+) Source {
+	t.Helper()
+	for _, source := range sources {
+		if source.Collection == collection {
+			return source
+		}
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			profileURL, err := source.App.ProfileURL(test.identity)
-			require.NoError(t, err)
-			require.Equal(t, test.want, profileURL)
-		})
-	}
+	require.FailNow(t, "profile source not found", collection)
+	return Source{}
 }
 
 func TestParseProfileSourcesRejectsInvalidConfiguration(t *testing.T) {
@@ -95,28 +133,6 @@ func TestParseProfileSourcesRejectsInvalidConfiguration(t *testing.T) {
 				}]
 			}`,
 			want: "invalid collection",
-		},
-		{
-			name: "unsafe app URL",
-			config: `{
-				"version":1,
-				"profiles":[{
-					"collection":"app.example.profile",
-					"recordKey":"self",
-					"selectors":{
-						"displayName":"$.displayName",
-						"description":"$.description",
-						"avatar":"$.avatar",
-						"createdAt":"$.createdAt"
-					},
-					"app":{
-						"name":"Example",
-						"icon":"example",
-						"profileURL":"javascript:alert({identifier})"
-					}
-				}]
-			}`,
-			want: "profileURL must be an HTTPS URL",
 		},
 	}
 

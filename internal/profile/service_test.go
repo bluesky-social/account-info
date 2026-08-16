@@ -123,13 +123,6 @@ func TestServiceLookup(t *testing.T) {
 		Source{
 			Collection: "org.example.profile",
 			RecordKey:  "self",
-			App: &ProfileApp{
-				Name: "Example App",
-				Icon: "example",
-				ProfileURL: func(identity Identity) (string, error) {
-					return "https://app.example/profile/" + identity.Handle, nil
-				},
-			},
 			Selectors: ProfileSelectors{
 				DisplayName: "$.profile.name",
 				Description: "$.profile.bio",
@@ -158,11 +151,6 @@ func TestServiceLookup(t *testing.T) {
 		string(reader.records["org.example.profile"].Value),
 		string(account.Profiles[0].Value),
 	)
-	require.Equal(t, &AppLink{
-		Name: "Example App",
-		Icon: "example",
-		URL:  "https://app.example/profile/alice.example",
-	}, account.Profiles[0].App)
 }
 
 func TestServiceLookupSelectsOldestProfileAsDefault(t *testing.T) {
@@ -255,7 +243,7 @@ func TestServiceLookupBreaksCreatedAtTiesByCollection(t *testing.T) {
 	require.Equal(t, "a.example.profile", account.Default)
 }
 
-func TestServiceLookupRejectsUnorderableProfiles(t *testing.T) {
+func TestServiceLookupIgnoresUnorderableProfilesWhenSelectingDefault(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -293,16 +281,51 @@ func TestServiceLookupRejectsUnorderableProfiles(t *testing.T) {
 				},
 			)
 
-			_, err := service.Lookup(context.Background(), "alice.example", nil)
-			require.ErrorIs(t, err, ErrProfileCreatedAt)
-			require.ErrorContains(t, err, "invalid.example.profile")
+			account, err := service.Lookup(context.Background(), "alice.example", nil)
+			require.NoError(t, err)
+			require.Equal(t, "valid.example.profile", account.Default)
+			require.Len(t, account.Profiles, 2)
 		})
 	}
 }
 
-func TestServiceLookupRejectsInvalidAppLink(t *testing.T) {
+func TestServiceLookupLeavesDefaultUnsetWhenNoProfileAgeIsKnown(t *testing.T) {
 	t.Parallel()
 
+	service := mustNewTestService(t,
+		&fakeResolver{identity: Identity{
+			DID: "did:plc:alice",
+			PDS: "https://pds.example",
+		}},
+		&fakeReader{records: map[string]Record{
+			"app.example.profile": {Collection: "app.example.profile"},
+			"org.example.profile": {Collection: "org.example.profile"},
+		}},
+		Source{Collection: "app.example.profile", RecordKey: "self"},
+		Source{Collection: "org.example.profile", RecordKey: "self"},
+	)
+
+	account, err := service.Lookup(context.Background(), "alice.example", nil)
+	require.NoError(t, err)
+	require.Empty(t, account.Default)
+	require.Len(t, account.Profiles, 2)
+}
+
+func TestServiceLookupToleratesLegacyTangledProfile(t *testing.T) {
+	t.Parallel()
+
+	const (
+		bskyCollection    = "app.bsky.actor.profile"
+		tangledCollection = "sh.tangled.actor.profile"
+	)
+	selectors := func(displayName, description, avatar, createdAt string) ProfileSelectors {
+		return ProfileSelectors{
+			DisplayName: displayName,
+			Description: description,
+			Avatar:      avatar,
+			CreatedAt:   createdAt,
+		}
+	}
 	service := mustNewTestService(t,
 		&fakeResolver{identity: Identity{
 			DID:    "did:plc:alice",
@@ -310,23 +333,82 @@ func TestServiceLookupRejectsInvalidAppLink(t *testing.T) {
 			PDS:    "https://pds.example",
 		}},
 		&fakeReader{records: map[string]Record{
-			"app.example.profile": {Collection: "app.example.profile"},
+			bskyCollection: {
+				Collection: bskyCollection,
+				Value: json.RawMessage(`{
+					"$type":"app.bsky.actor.profile",
+					"displayName":"Alice",
+					"createdAt":"2024-01-02T03:04:05Z"
+				}`),
+			},
+			tangledCollection: {
+				Collection: tangledCollection,
+				Value: json.RawMessage(
+					`{"$type":"sh.tangled.actor.profile","bluesky":false}`,
+				),
+			},
 		}},
 		Source{
-			Collection: "app.example.profile",
+			Collection: bskyCollection,
 			RecordKey:  "self",
-			App: &ProfileApp{
-				Name: "Unsafe App",
-				Icon: "unsafe",
-				ProfileURL: func(Identity) (string, error) {
-					return "javascript:alert(1)", nil
-				},
+			Selectors: selectors(
+				"$.displayName", "$.description", "$.avatar", "$.createdAt",
+			),
+		},
+		Source{
+			Collection: tangledCollection,
+			RecordKey:  "self",
+			Selectors: selectors(
+				"$.preferredHandle", "$.description", "$.avatar", "$.createdAt",
+			),
+		},
+	)
+
+	account, err := service.Lookup(context.Background(), "alice.example", nil)
+	require.NoError(t, err)
+	require.Equal(t, bskyCollection, account.Default)
+	require.Equal(t, "Alice", account.DisplayName)
+	require.Len(t, account.Profiles, 2)
+}
+
+func TestServiceLookupUsesValidFieldsFromPartiallyInvalidProfile(t *testing.T) {
+	t.Parallel()
+
+	const collection = "app.example.profile"
+	service := mustNewTestService(t,
+		&fakeResolver{identity: Identity{
+			DID: "did:plc:alice",
+			PDS: "https://pds.example",
+		}},
+		&fakeReader{records: map[string]Record{
+			collection: {
+				Collection: collection,
+				Value: json.RawMessage(`{
+					"$type":"app.example.profile",
+					"displayName":42,
+					"description":"Builder",
+					"createdAt":"2024-01-02T03:04:05Z"
+				}`),
+			},
+		}},
+		Source{
+			Collection: collection,
+			RecordKey:  "self",
+			Selectors: ProfileSelectors{
+				DisplayName: "$.displayName",
+				Description: "$.description",
+				Avatar:      "$.avatar",
+				CreatedAt:   "$.createdAt",
 			},
 		},
 	)
 
-	_, err := service.Lookup(context.Background(), "alice.example", nil)
-	require.ErrorContains(t, err, "invalid app profile URL")
+	account, err := service.Lookup(context.Background(), "alice.example", nil)
+	require.NoError(t, err)
+	require.Equal(t, collection, account.Default)
+	require.Empty(t, account.DisplayName)
+	require.Equal(t, "Builder", account.Description)
+	require.Len(t, account.Profiles, 1)
 }
 
 func TestServiceLookupAllSkipsMissingRecords(t *testing.T) {
@@ -586,12 +668,14 @@ func TestExtractJSONProfileAllowsAbsentOptionalValues(t *testing.T) {
 func TestExtractJSONProfileRejectsInvalidSelectedValue(t *testing.T) {
 	t.Parallel()
 
-	_, err := extractTestJSONProfile(t,
+	summary, err := extractTestJSONProfile(t,
 		Identity{},
 		"example.actor.profile",
 		json.RawMessage(`{
 			"$type":"example.actor.profile",
-			"displayName":42
+			"displayName":42,
+			"description":"Builder",
+			"createdAt":"2024-01-02T03:04:05Z"
 		}`),
 		ProfileSelectors{
 			DisplayName: "$.displayName",
@@ -602,6 +686,34 @@ func TestExtractJSONProfileRejectsInvalidSelectedValue(t *testing.T) {
 	)
 	require.ErrorContains(t, err, "extract displayName")
 	require.ErrorContains(t, err, "selected value is not a string")
+	require.Equal(t, "Builder", summary.Description)
+	require.Equal(t, "2024-01-02T03:04:05Z", summary.CreatedAt)
+}
+
+func TestExtractJSONProfilePreservesTextWhenAvatarIsInvalid(t *testing.T) {
+	t.Parallel()
+
+	summary, err := extractTestJSONProfile(t,
+		Identity{},
+		"example.actor.profile",
+		json.RawMessage(`{
+			"$type":"example.actor.profile",
+			"displayName":"Alice",
+			"description":"Builder",
+			"avatar":"legacy avatar",
+			"createdAt":"2024-01-02T03:04:05Z"
+		}`),
+		ProfileSelectors{
+			DisplayName: "$.displayName",
+			Description: "$.description",
+			Avatar:      "$.avatar",
+			CreatedAt:   "$.createdAt",
+		},
+	)
+	require.ErrorContains(t, err, "decode avatar")
+	require.Equal(t, "Alice", summary.DisplayName)
+	require.Equal(t, "Builder", summary.Description)
+	require.Nil(t, summary.AvatarRef)
 }
 
 func TestJSONPathSelectsQuotedPropertyNames(t *testing.T) {

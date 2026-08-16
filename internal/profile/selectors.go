@@ -3,6 +3,7 @@ package profile
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -93,17 +94,27 @@ func extractJSONProfile(
 		)
 	}
 
+	var extractionErrors []error
 	displayName, err := selectJSONString(document, selectors.displayName)
 	if err != nil {
-		return Summary{}, fmt.Errorf("extract displayName: %w", err)
+		extractionErrors = append(
+			extractionErrors,
+			fmt.Errorf("extract displayName: %w", err),
+		)
 	}
 	description, err := selectJSONString(document, selectors.description)
 	if err != nil {
-		return Summary{}, fmt.Errorf("extract description: %w", err)
+		extractionErrors = append(
+			extractionErrors,
+			fmt.Errorf("extract description: %w", err),
+		)
 	}
 	createdAt, err := selectJSONString(document, selectors.createdAt)
 	if err != nil {
-		return Summary{}, fmt.Errorf("extract createdAt: %w", err)
+		extractionErrors = append(
+			extractionErrors,
+			fmt.Errorf("extract createdAt: %w", err),
+		)
 	}
 
 	summary := Summary{
@@ -113,26 +124,42 @@ func extractJSONProfile(
 	}
 	avatar, found, err := selectJSONValue(document, selectors.avatar)
 	if err != nil {
-		return Summary{}, fmt.Errorf("extract avatar: %w", err)
+		extractionErrors = append(
+			extractionErrors,
+			fmt.Errorf("extract avatar: %w", err),
+		)
+		return summary, errors.Join(extractionErrors...)
 	}
 	if !found || avatar == nil {
-		return summary, nil
+		return summary, errors.Join(extractionErrors...)
 	}
 
 	ref, err := decodeProfileBlob(avatar)
 	if err != nil {
-		return Summary{}, fmt.Errorf("decode avatar: %w", err)
+		extractionErrors = append(
+			extractionErrors,
+			fmt.Errorf("decode avatar: %w", err),
+		)
+		return summary, errors.Join(extractionErrors...)
 	}
 	if _, err := validateAvatarRef(ref); err != nil {
-		return Summary{}, fmt.Errorf("decode avatar: %w", err)
+		extractionErrors = append(
+			extractionErrors,
+			fmt.Errorf("decode avatar: %w", err),
+		)
+		return summary, errors.Join(extractionErrors...)
 	}
 	avatarURL, err := blobURL(account.PDS, account.DID, ref.CID)
 	if err != nil {
-		return Summary{}, fmt.Errorf("build avatar URL: %w", err)
+		extractionErrors = append(
+			extractionErrors,
+			fmt.Errorf("build avatar URL: %w", err),
+		)
+		return summary, errors.Join(extractionErrors...)
 	}
 	summary.Avatar = avatarURL
 	summary.AvatarRef = &ref
-	return summary, nil
+	return summary, errors.Join(extractionErrors...)
 }
 
 func decodeJSONDocument(value json.RawMessage) (any, error) {

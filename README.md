@@ -4,8 +4,8 @@
 
 ## Account profiles
 
-Open an account by handle or DID in a browser to see its default profile and
-every other supported profile record on a small landing page:
+Open an account by handle or DID in a browser to see its public profile on a
+small landing page:
 
 ```text
 https://account.info/bsky.app
@@ -38,9 +38,10 @@ expressions for `displayName`, `description`, `avatar`, and `createdAt`.
 Selected values populate the top-level account summary; the complete record is
 always returned under `profiles`.
 
-An entry may also define application-link metadata. Its `profileURL` must be an
-HTTPS URL containing one `{identifier}` placeholder in the path. New icon names
-require a matching SVG in `internal/web/assets/apps`.
+Missing or malformed selected fields are treated as unavailable without
+discarding the complete profile record. With multiple records, the default is
+the oldest profile with a valid `createdAt`; if none has a usable timestamp,
+`default` and the derived top-level profile fields are omitted.
 
 ## Avatars
 

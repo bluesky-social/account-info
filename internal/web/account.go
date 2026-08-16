@@ -240,13 +240,6 @@ func classifyLookupFailure(err error, collections []string) lookupFailure {
 			message:     err.Error(),
 			htmlMessage: "That account does not have an avatar.",
 		}
-	case errors.Is(err, profile.ErrProfileCreatedAt):
-		return lookupFailure{
-			status:      http.StatusConflict,
-			code:        "profile_age_unknown",
-			message:     err.Error(),
-			htmlMessage: "A default profile could not be selected for that account.",
-		}
 	case errors.Is(err, context.DeadlineExceeded):
 		return lookupFailure{
 			status:      http.StatusGatewayTimeout,
@@ -331,14 +324,13 @@ func newAccountResponse(account *profile.Account) (accountResponse, error) {
 			Value: record.Value,
 		}
 	}
-	if account.Default == "" {
-		return accountResponse{}, fmt.Errorf("default profile collection is empty")
-	}
-	if _, exists := profiles[account.Default]; !exists {
-		return accountResponse{}, fmt.Errorf(
-			"default profile collection is missing: %s",
-			account.Default,
-		)
+	if account.Default != "" {
+		if _, exists := profiles[account.Default]; !exists {
+			return accountResponse{}, fmt.Errorf(
+				"default profile collection is missing: %s",
+				account.Default,
+			)
+		}
 	}
 
 	return accountResponse{

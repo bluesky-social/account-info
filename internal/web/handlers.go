@@ -2,13 +2,12 @@ package web
 
 import (
 	"bytes"
-	"embed"
+	_ "embed"
 	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 )
 
 //go:embed index.html
@@ -16,9 +15,6 @@ var indexHTML string
 
 //go:embed style.css
 var stylesheet string
-
-//go:embed assets/apps/*.svg
-var staticAssets embed.FS
 
 var indexTemplate = template.Must(template.New("index.html").Parse(indexHTML))
 
@@ -36,44 +32,10 @@ func routes(
 	mux.HandleFunc("GET /{$}", handleRoot)
 	mux.HandleFunc("GET /lookup", handleLookup)
 	mux.HandleFunc("GET /healthz", handleHealth)
-	mux.HandleFunc("GET /assets/apps/{file}", handleAppIcon)
 	mux.Handle("GET /avatar/{identifier}/{file}", limitLookups(limiter, handleAvatar(accounts)))
 	mux.Handle("GET /avatar/{identifier}", limitLookups(limiter, handleAvatar(accounts)))
 	mux.Handle("GET /{identifier}", limitLookups(limiter, handleAccount(accounts)))
 	return mux
-}
-
-func handleAppIcon(w http.ResponseWriter, request *http.Request) {
-	icon, ok := strings.CutSuffix(request.PathValue("file"), ".svg")
-	if !ok || !validAssetName(icon) {
-		http.NotFound(w, request)
-		return
-	}
-	writeSVGAsset(w, request, "assets/apps/"+icon+".svg")
-}
-
-func writeSVGAsset(w http.ResponseWriter, request *http.Request, path string) {
-	content, err := staticAssets.ReadFile(path)
-	if err != nil {
-		http.NotFound(w, request)
-		return
-	}
-	w.Header().Set("Content-Type", "image/svg+xml")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(content)
-}
-
-func validAssetName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for _, character := range name {
-		if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789-", character) {
-			return false
-		}
-	}
-	return true
 }
 
 func handleRoot(w http.ResponseWriter, _ *http.Request) {

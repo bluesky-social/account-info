@@ -77,7 +77,7 @@ func TestRootExplainsService(t *testing.T) {
 
 	body := response.Body.String()
 	require.Contains(t, body, "<style>")
-	require.Contains(t, body, ".profile-card")
+	require.NotContains(t, body, ".profile-card")
 	require.Contains(t, body, "<title>account.info — AT Protocol profile lookup</title>")
 	require.Contains(t, body, "https://account.info/bsky.app")
 	require.Contains(t, body, "https://account.info/did:plc:z72i7hdynmk6r22z27h6tvur")
@@ -155,41 +155,6 @@ func TestUnmatchedPathReturnsNotFound(t *testing.T) {
 		context.Background(),
 		http.MethodGet,
 		"/unknown/nested/path",
-		http.NoBody,
-	)
-	response := httptest.NewRecorder()
-
-	routes(&fakeAccountLookup{}, nil).ServeHTTP(response, request)
-
-	require.Equal(t, http.StatusNotFound, response.Code)
-}
-
-func TestAppIcon(t *testing.T) {
-	t.Parallel()
-
-	request := httptest.NewRequestWithContext(
-		context.Background(),
-		http.MethodGet,
-		"/assets/apps/bluesky.svg",
-		http.NoBody,
-	)
-	response := httptest.NewRecorder()
-
-	routes(&fakeAccountLookup{}, nil).ServeHTTP(response, request)
-
-	require.Equal(t, http.StatusOK, response.Code)
-	require.Equal(t, "image/svg+xml", response.Header().Get("Content-Type"))
-	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
-	require.Contains(t, response.Body.String(), "<svg")
-}
-
-func TestUnknownAppIconReturnsNotFound(t *testing.T) {
-	t.Parallel()
-
-	request := httptest.NewRequestWithContext(
-		context.Background(),
-		http.MethodGet,
-		"/assets/apps/%2e%2e.svg",
 		http.NoBody,
 	)
 	response := httptest.NewRecorder()

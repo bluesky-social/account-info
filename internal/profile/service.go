@@ -6,9 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
+	"log/slog"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/jcalabro/atmos"
@@ -29,8 +28,6 @@ var (
 	ErrProfileNotFound = errors.New("profile not found")
 	// ErrAvatarNotFound indicates that the selected profile has no avatar.
 	ErrAvatarNotFound = errors.New("avatar not found")
-	// ErrProfileCreatedAt indicates that multiple profiles cannot be ordered by age.
-	ErrProfileCreatedAt = errors.New("profile createdAt is missing or invalid")
 )
 
 // BlobRef identifies an avatar blob declared by a profile record.
@@ -53,7 +50,6 @@ type Source struct {
 	RecordKey         string
 	Selectors         ProfileSelectors
 	Extract           func(Identity, json.RawMessage) (Summary, error)
-	App               *ProfileApp
 	compiledSelectors *compiledProfileSelectors
 }
 
@@ -86,21 +82,6 @@ func (s *Source) validate() error {
 	return nil
 }
 
-// ProfileApp describes how a profile record links to its application.
-type ProfileApp struct {
-	Name string
-	// Icon names the self-hosted assets/apps/<icon>.svg presentation asset.
-	Icon       string
-	ProfileURL func(Identity) (string, error)
-}
-
-// AppLink is a resolved application profile link for a record.
-type AppLink struct {
-	Name string
-	Icon string
-	URL  string
-}
-
 // Summary contains canonical fields extracted from the selected profile.
 type Summary struct {
 	DisplayName string   `json:"displayName,omitempty"`
@@ -123,7 +104,6 @@ type Record struct {
 	URI        string          `json:"uri"`
 	CID        string          `json:"cid,omitempty"`
 	Value      json.RawMessage `json:"value"`
-	App        *AppLink        `json:"-"`
 }
 
 // Account contains a resolved identity and its available profile records.
@@ -269,27 +249,9 @@ func (s *Service) lookup(
 		if getErr != nil {
 			return Account{}, fmt.Errorf("get %s: %w", source.Collection, getErr)
 		}
-		if source.App != nil {
-			appLink, linkErr := resolveAppLink(identity, source.App)
-			if linkErr != nil {
-				return Account{}, fmt.Errorf(
-					"link %s: %w",
-					source.Collection,
-					linkErr,
-				)
-			}
-			record.App = &appLink
-		}
 		var summary Summary
 		if source.Extract != nil {
 			summary, getErr = source.Extract(identity, record.Value)
-			if getErr != nil {
-				return Account{}, fmt.Errorf(
-					"extract %s: %w",
-					source.Collection,
-					getErr,
-				)
-			}
 		} else if source.Selectors.configured() {
 			summary, getErr = extractJSONProfile(
 				identity,
@@ -297,19 +259,29 @@ func (s *Service) lookup(
 				record.Value,
 				source.compiledSelectors,
 			)
-			if getErr != nil {
-				return Account{}, fmt.Errorf(
-					"extract %s: %w",
-					source.Collection,
-					getErr,
-				)
-			}
+		}
+		if getErr != nil {
+			slog.WarnContext(
+				ctx,
+				"profile record contains invalid summary data",
+				"did", identity.DID,
+				"collection", source.Collection,
+				"error", getErr,
+			)
 		}
 		account.Profiles = append(account.Profiles, record)
 		summaries = append(summaries, summary)
 	}
 	if err := selectDefaultProfile(&account, summaries); err != nil {
 		return Account{}, err
+	}
+	if len(account.Profiles) > 1 && account.Default == "" {
+		slog.WarnContext(
+			ctx,
+			"no profile has a valid createdAt; default profile is unset",
+			"did", identity.DID,
+			"profiles", len(account.Profiles),
+		)
 	}
 	return account, nil
 }
@@ -322,30 +294,31 @@ func selectDefaultProfile(account *Account, summaries []Summary) error {
 		return fmt.Errorf("profile and summary counts differ")
 	}
 
-	selected := 0
-	if len(account.Profiles) > 1 {
-		oldest, err := parseProfileCreatedAt(
-			account.Profiles[0].Collection,
-			summaries[0].CreatedAt,
+	if len(account.Profiles) == 1 {
+		account.Default = account.Profiles[0].Collection
+		applySummary(account, summaries[0])
+		return nil
+	}
+
+	selected := -1
+	var oldest time.Time
+	for index := range account.Profiles {
+		createdAt, err := parseProfileCreatedAt(
+			account.Profiles[index].Collection,
+			summaries[index].CreatedAt,
 		)
 		if err != nil {
-			return err
+			continue
 		}
-		for index := 1; index < len(account.Profiles); index++ {
-			createdAt, parseErr := parseProfileCreatedAt(
-				account.Profiles[index].Collection,
-				summaries[index].CreatedAt,
-			)
-			if parseErr != nil {
-				return parseErr
-			}
-			if createdAt.Before(oldest) ||
-				(createdAt.Equal(oldest) &&
-					account.Profiles[index].Collection < account.Profiles[selected].Collection) {
-				selected = index
-				oldest = createdAt
-			}
+		if selected == -1 || createdAt.Before(oldest) ||
+			(createdAt.Equal(oldest) &&
+				account.Profiles[index].Collection < account.Profiles[selected].Collection) {
+			selected = index
+			oldest = createdAt
 		}
+	}
+	if selected == -1 {
+		return nil
 	}
 
 	account.Default = account.Profiles[selected].Collection
@@ -355,51 +328,17 @@ func selectDefaultProfile(account *Account, summaries []Summary) error {
 
 func parseProfileCreatedAt(collection, raw string) (time.Time, error) {
 	if raw == "" {
-		return time.Time{}, fmt.Errorf("%w: %s", ErrProfileCreatedAt, collection)
+		return time.Time{}, fmt.Errorf("%s: createdAt is missing", collection)
 	}
 	createdAt, err := time.Parse(time.RFC3339Nano, raw)
 	if err != nil {
 		return time.Time{}, fmt.Errorf(
-			"%w: %s: %w",
-			ErrProfileCreatedAt,
+			"%s: createdAt is invalid: %w",
 			collection,
 			err,
 		)
 	}
 	return createdAt, nil
-}
-
-func resolveAppLink(identity Identity, app *ProfileApp) (AppLink, error) {
-	if app.Name == "" {
-		return AppLink{}, fmt.Errorf("app name is empty")
-	}
-	if !validAppIcon(app.Icon) {
-		return AppLink{}, fmt.Errorf("invalid app icon %q", app.Icon)
-	}
-	if app.ProfileURL == nil {
-		return AppLink{}, fmt.Errorf("app profile URL builder is nil")
-	}
-	rawURL, err := app.ProfileURL(identity)
-	if err != nil {
-		return AppLink{}, fmt.Errorf("build app profile URL: %w", err)
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
-		return AppLink{}, fmt.Errorf("invalid app profile URL %q", rawURL)
-	}
-	return AppLink{Name: app.Name, Icon: app.Icon, URL: parsed.String()}, nil
-}
-
-func validAppIcon(icon string) bool {
-	if icon == "" {
-		return false
-	}
-	for _, character := range icon {
-		if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789-", character) {
-			return false
-		}
-	}
-	return true
 }
 
 func applySummary(account *Account, summary Summary) {
