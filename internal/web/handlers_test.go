@@ -87,6 +87,7 @@ func TestRootExplainsService(t *testing.T) {
 	require.Contains(t, body, `<form class="lookup" action="/lookup" method="get">`)
 	require.Contains(t, body, `name="identifier"`)
 	require.Contains(t, body, `placeholder="alice.example or did:plc:..."`)
+	require.Contains(t, body, `autofocus`)
 	require.Contains(t, body, `autocomplete="off"`)
 	require.Contains(t, body, `data-1p-ignore`)
 	require.Contains(t, body, `>Look up</button>`)
