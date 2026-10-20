@@ -1,6 +1,6 @@
 module github.com/bluesky-social/account-info
 
-go 1.26
+go 1.26.10
 
 require (
 	github.com/jcalabro/atmos v0.3.3
